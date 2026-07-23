@@ -1,0 +1,6 @@
+{
+  "name": "ENLACEC",
+  "description": "Sistema de gestión académica, financiera y administrativa con paneles para administradores y docentes.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
