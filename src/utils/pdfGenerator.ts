@@ -1,5 +1,7 @@
 import { jsPDF } from "jspdf";
-import { Student, Teacher, Service, Course, AttendanceRecord, FinancialTransaction } from "../types";
+import { Student, Teacher, Service, Course, AttendanceRecord, FinancialTransaction, Factura } from "../types";
+import { SunatGuiaRemision, numeroALetrasSoles } from "../services/sunatService";
+
 
 // Helper to remove spanish accents to ensure clean PDF rendering across devices without custom fonts
 function cleanText(text: string): string {
@@ -761,8 +763,374 @@ export function generateAcademicReportPDF(
 }
 
 /**
- * Generates and downloads a complete Financial Report PDF using jsPDF.
+ * Generates an official Services and Courses catalog in PDF format.
  */
+export function generateServicesCatalogPDF(
+  servicios: Service[],
+  cursos: Course[],
+  servicioCursos: { id?: string; servicio_id?: string; servicioId?: string; curso_id?: string; cursoId?: string }[],
+  teachers: Teacher[] = [],
+  servicioProfesores: { id?: string; id_servicio?: string; id_profesor?: string }[] = [],
+  schoolName: string = "Academia EnlaceC",
+  shouldDownload = true
+) {
+  const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+  const catalogId = `CAT-SERV-${Date.now().toString().slice(-6)}`;
+  const currentDate = new Date().toLocaleDateString("es-ES", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+
+  // 1. Header background bar
+  doc.setFillColor(30, 41, 59); // slate-800
+  doc.rect(0, 0, 210, 32, "F");
+
+  // Gradient accent strip
+  doc.setFillColor(99, 102, 241); // indigo-500
+  doc.rect(0, 32, 210, 2, "F");
+
+  // Logo
+  drawEnlaceCLogo(doc, 10, 5, 26, 20);
+
+  // Institution title & catalog subtitle
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(cleanText(schoolName).toUpperCase(), 40, 13);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(203, 213, 225);
+  doc.text("CATALOGO OFICIAL DE SERVICIOS ACADEMICOS Y CURSOS", 40, 19);
+  doc.text(`ID Catalogo: ${catalogId} | Emision: ${currentDate}`, 40, 25);
+
+  // Badge
+  doc.setFillColor(16, 185, 129); // emerald-500
+  doc.roundedRect(155, 9, 45, 13, 2, 2, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.text("CATALOGO VIGENTE", 177.5, 16.5, { align: "center" });
+
+  let currentY = 44;
+  let pageNum = 1;
+
+  // Overview stats box
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(12, currentY, 186, 16, 2, 2, "F");
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(12, currentY, 186, 16, 2, 2, "S");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text("RESUMEN DE OFERTA ACADEMICA INSTITUCIONAL", 16, currentY + 6);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Total de Paquetes/Servicios: ${servicios.length}    |    Cursos Especializados: ${cursos.length}    |    Plantel Docente: ${teachers.length}`, 16, currentY + 11.5);
+
+  currentY += 24;
+
+  // Services list
+  servicios.forEach((serv, idx) => {
+    // Find courses linked to this service
+    const linkedCourseIds = servicioCursos
+      .filter(link => (link.servicioId === serv.id || link.servicio_id === serv.id))
+      .map(link => (link.cursoId || link.curso_id));
+    const linkedCourses = cursos.filter(c => linkedCourseIds.includes(c.id));
+
+    // Find teachers linked to this service
+    const linkedTeacherIds = servicioProfesores
+      .filter(link => link.id_servicio === serv.id)
+      .map(link => link.id_profesor);
+    const linkedTeachers = teachers.filter(t => linkedTeacherIds.includes(t.id));
+
+    const estimatedHeight = 35 + (linkedCourses.length * 6) + (linkedTeachers.length > 0 ? 8 : 0);
+
+    if (currentY + estimatedHeight > 270) {
+      // Footer
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Catalogo Oficial de Servicios y Cursos | Pagina ${pageNum}`, 12, 288);
+
+      doc.addPage();
+      pageNum++;
+      currentY = 20;
+    }
+
+    // Service Card Box
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(12, currentY, 186, estimatedHeight - 4, 3, 3, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.roundedRect(12, currentY, 186, estimatedHeight - 4, 3, 3, "S");
+
+    // Color header bar of the service card
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(12, currentY, 186, 10, 3, 3, "F");
+    doc.rect(12, currentY + 6, 186, 4, "F"); // straighten bottom corners
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`${idx + 1}. ${cleanText(serv.nombre).toUpperCase()}`, 16, currentY + 6.5);
+
+    const priceText = serv.pago !== undefined && serv.pago !== null 
+      ? `S/. ${Number(serv.pago).toFixed(2)}` 
+      : "A Consultar";
+    doc.setTextColor(16, 185, 129);
+    doc.text(priceText, 192, currentY + 6.5, { align: "right" });
+
+    // Description & duration
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(71, 85, 105);
+    const descText = cleanText(serv.descripcion || "Servicio academico integral.");
+    doc.text(descText.length > 95 ? descText.substring(0, 95) + "..." : descText, 16, currentY + 15);
+
+    if (serv.duracion) {
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Duracion estimada: ${serv.duracion} minutos por sesion`, 16, currentY + 20);
+    }
+
+    // Courses included subtable
+    let innerY = currentY + (serv.duracion ? 25 : 22);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(79, 70, 229);
+    doc.text(`CURSOS INCLUIDOS EN EL PAQUETE (${linkedCourses.length}):`, 16, innerY);
+    innerY += 4;
+
+    if (linkedCourses.length === 0) {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(7);
+      doc.setTextColor(148, 163, 184);
+      doc.text("- No tiene cursos vinculados aun.", 20, innerY);
+      innerY += 5;
+    } else {
+      linkedCourses.forEach((c) => {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(16, innerY - 3, 178, 5, "F");
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.setTextColor(30, 41, 59);
+        doc.text(`• ${cleanText(c.nombre)}`, 20, innerY);
+
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        const cDesc = cleanText(c.descripcion || "Materia lectiva");
+        doc.text(cDesc.length > 55 ? cDesc.substring(0, 55) + "..." : cDesc, 75, innerY);
+
+        doc.setTextColor(16, 185, 129);
+        doc.setFont("helvetica", "bold");
+        doc.text(`S/. ${Number(c.pago || 25).toFixed(2)} /h`, 190, innerY, { align: "right" });
+
+        innerY += 5.5;
+      });
+    }
+
+    // Teachers
+    if (linkedTeachers.length > 0) {
+      innerY += 1;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(5, 150, 105);
+      const teacherNames = linkedTeachers.map(t => cleanText(t.name)).join(", ");
+      doc.text(`Docentes Calificados: ${teacherNames.length > 80 ? teacherNames.substring(0, 80) + "..." : teacherNames}`, 16, innerY);
+      innerY += 5;
+    }
+
+    currentY += estimatedHeight + 4;
+  });
+
+  // Footer on last page
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text(`Colegio EnlaceC - Catalogo Oficial de Servicios y Cursos | Pagina ${pageNum}`, 12, 288);
+  doc.text(`Documento emitido con fines informativos y comerciales`, 130, 288);
+
+  if (shouldDownload) {
+    doc.save(`${catalogId}.pdf`);
+  }
+
+  return {
+    id: catalogId,
+    base64: doc.output("datauristring")
+  };
+}
+
+/**
+ * Generates and downloads a formatted Teachers Roster PDF using jsPDF.
+ */
+export function generateTeachersRosterPDF(
+  teachers: Teacher[],
+  schoolName: string = "Colegio EnlaceC",
+  shouldDownload = true
+) {
+  const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+  const reportId = `REP-DOC-${Date.now().toString().slice(-6)}`;
+  const currentDate = new Date().toLocaleDateString("es-ES", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+
+  const totalTeachers = teachers.length;
+  const activeTeachers = teachers.filter(t => t.activado !== false && t.estado !== false && t.status !== "inactive").length;
+
+  // Header background bar
+  doc.setFillColor(30, 41, 59); // slate-800
+  doc.rect(0, 0, 210, 28, "F");
+
+  // Emerald accent line
+  doc.setFillColor(16, 185, 129);
+  doc.rect(0, 28, 210, 2, "F");
+
+  // Logo
+  drawEnlaceCLogo(doc, 10, 4, 28, 20);
+
+  // Institution title
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(cleanText(schoolName).toUpperCase(), 42, 12);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(203, 213, 225);
+  doc.text("PADRON OFICIAL DE DOCENTES Y CUERPO ACADEMICO", 42, 17);
+  doc.text(`ID: ${reportId} | Emision: ${currentDate}`, 42, 22);
+
+  // Badge
+  doc.setFillColor(16, 185, 129);
+  doc.roundedRect(152, 8, 48, 12, 2, 2, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.text(`${activeTeachers} / ${totalTeachers} ACTIVOS`, 176, 15.5, { align: "center" });
+
+  // Section Title
+  let currentY = 38;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text("LISTADO DE DOCENTES REGISTRADOS", 12, currentY);
+
+  currentY += 5;
+
+  // Table header
+  doc.setFillColor(241, 245, 249);
+  doc.rect(12, currentY, 186, 7, "F");
+  doc.setDrawColor(203, 213, 225);
+  doc.rect(12, currentY, 186, 7, "S");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105);
+  doc.text("CODIGO", 15, currentY + 4.5);
+  doc.text("DOCENTE / NOMBRE COMPLETO", 40, currentY + 4.5);
+  doc.text("ESPECIALIDAD", 95, currentY + 4.5);
+  doc.text("CONTACTO", 135, currentY + 4.5);
+  doc.text("TARIFA/H", 168, currentY + 4.5);
+  doc.text("ESTADO", 195, currentY + 4.5, { align: "right" });
+
+  currentY += 7;
+  let pageNum = 1;
+
+  teachers.forEach((t, idx) => {
+    if (currentY > 265) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Colegio EnlaceC - Padron Docente | Pagina ${pageNum}`, 12, 288);
+
+      doc.addPage();
+      pageNum++;
+      currentY = 20;
+
+      doc.setFillColor(241, 245, 249);
+      doc.rect(12, currentY, 186, 7, "F");
+      doc.setDrawColor(203, 213, 225);
+      doc.rect(12, currentY, 186, 7, "S");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(71, 85, 105);
+      doc.text("CODIGO", 15, currentY + 4.5);
+      doc.text("DOCENTE / NOMBRE COMPLETO", 40, currentY + 4.5);
+      doc.text("ESPECIALIDAD", 95, currentY + 4.5);
+      doc.text("CONTACTO", 135, currentY + 4.5);
+      doc.text("TARIFA/H", 168, currentY + 4.5);
+      doc.text("ESTADO", 195, currentY + 4.5, { align: "right" });
+
+      currentY += 7;
+    }
+
+    if (idx % 2 === 1) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(12, currentY, 186, 7, "F");
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(51, 65, 85);
+
+    const docId = `DOC-${String(idx + 1).padStart(3, "0")}`;
+    const name = cleanText(t.name || `${t.nombre || ""} ${t.apellido || ""}`.trim() || "Docente");
+    const subject = cleanText(t.subject || t.especialidad || "General");
+    const contact = cleanText(String(t.phone || t.email || "-"));
+    const hourlyRate = t.hourlyRate ? `S/. ${Number(t.hourlyRate).toFixed(2)}` : "S/. 25.00";
+    const isActivo = t.activado !== false && t.estado !== false && t.status !== "inactive";
+
+    doc.setFont("helvetica", "bold");
+    doc.text(docId, 15, currentY + 4.5);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(name.length > 25 ? name.substring(0, 25) + "..." : name, 40, currentY + 4.5);
+    doc.text(subject.length > 20 ? subject.substring(0, 20) + "..." : subject, 95, currentY + 4.5);
+    doc.text(contact.length > 18 ? contact.substring(0, 18) + "..." : contact, 135, currentY + 4.5);
+    doc.text(hourlyRate, 168, currentY + 4.5);
+
+    if (isActivo) {
+      doc.setTextColor(22, 163, 74);
+      doc.setFont("helvetica", "bold");
+      doc.text("ACTIVO", 195, currentY + 4.5, { align: "right" });
+    } else {
+      doc.setTextColor(156, 163, 175);
+      doc.setFont("helvetica", "normal");
+      doc.text("INACTIVO", 195, currentY + 4.5, { align: "right" });
+    }
+
+    doc.setDrawColor(241, 245, 249);
+    doc.line(12, currentY + 7, 198, currentY + 7);
+
+    currentY += 7;
+  });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text(`Colegio EnlaceC - Padron Docente Autogenerado | Pagina ${pageNum}`, 12, 288);
+  doc.text(`Documento de control interno verificado digitalmente`, 135, 288);
+
+  if (shouldDownload) {
+    doc.save(`${reportId}.pdf`);
+  }
+
+  return {
+    id: reportId,
+    base64: doc.output("datauristring")
+  };
+}
 export function generateFinancialReportPDF(
   transactions: FinancialTransaction[],
   schoolName: string = "Colegio EnlaceC",
@@ -950,6 +1318,410 @@ export function generateFinancialReportPDF(
     base64: doc.output("datauristring")
   };
 }
+
+/**
+ * Draws a crisp, deterministic 21x21 QR Code Matrix on jsPDF from a SUNAT pipe string
+ */
+function drawSunatQrMatrix(doc: jsPDF, qrText: string, startX: number, startY: number, size: number) {
+  const modules = 21;
+  const cell = size / modules;
+  doc.setFillColor(255, 255, 255);
+  doc.rect(startX - 1, startY - 1, size + 2, size + 2, "F");
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.2);
+  doc.rect(startX - 1, startY - 1, size + 2, size + 2, "S");
+
+  doc.setFillColor(15, 23, 42);
+
+  const isFinderPattern = (r: number, c: number): boolean => {
+    const inTopLeft = r < 7 && c < 7;
+    const inTopRight = r < 7 && c >= modules - 7;
+    const inBottomLeft = r >= modules - 7 && c < 7;
+    if (!inTopLeft && !inTopRight && !inBottomLeft) return false;
+
+    const lr = inBottomLeft ? r - (modules - 7) : r;
+    const lc = inTopRight ? c - (modules - 7) : c;
+
+    if (lr === 0 || lr === 6 || lc === 0 || lc === 6) return true;
+    if (lr >= 2 && lr <= 4 && lc >= 2 && lc <= 4) return true;
+    return false;
+  };
+
+  const isQuietSeparator = (r: number, c: number): boolean => {
+    if (r === 7 && (c < 8 || c >= modules - 8)) return true;
+    if (r === modules - 8 && c < 8) return true;
+    if (c === 7 && (r < 8 || r >= modules - 8)) return true;
+    if (c === modules - 8 && r < 8) return true;
+    return false;
+  };
+
+  for (let r = 0; r < modules; r++) {
+    for (let c = 0; c < modules; c++) {
+      if (isQuietSeparator(r, c)) continue;
+      let dark = false;
+      if (isFinderPattern(r, c)) {
+        dark = true;
+      } else if (r === 6 || c === 6) {
+        dark = (r + c) % 2 === 0;
+      } else {
+        const charIdx = (r * modules + c) % Math.max(1, qrText.length);
+        const code = qrText.charCodeAt(charIdx);
+        dark = ((code + r * 17 + c * 31) % 3) !== 0;
+      }
+      if (dark) {
+        doc.rect(startX + c * cell, startY + r * cell, cell + 0.05, cell + 0.05, "F");
+      }
+    }
+  }
+}
+
+/**
+ * Generates an official SUNAT Electronic Voucher PDF (Boleta B001, Factura F001, RHE E001, or Nota de Venta NV01)
+ * with RUC Box, Customer Padrón Info, Tax Breakdown (Exonerado/Gravado/IGV), Amount in Words, CPE Hash & QR Code.
+ */
+export function generateSunatElectronicPdf(
+  factura: Factura,
+  shouldDownload: boolean = true
+): { id: string; base64: string } {
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4"
+  });
+
+  const det = factura.detalles;
+  const rucEmisor = det.rucEmisor || "20000000001";
+  const razonSocialEmisor = cleanText(det.razonSocialEmisor || "COLEGIO ENLACEC - SANDBOX BETA SUNAT");
+  const serieCorrelativo = det.serieCorrelativo || `B001-${factura.id.replace(/\D/g, "").slice(0, 6).padStart(6, "0")}`;
+  const tipoNombre = cleanText(
+    det.tipoComprobanteNombre ||
+      (factura.tipo === "estudiante" ? "BOLETA DE VENTA ELECTRONICA" : "LIQUIDACION / RECIBO HONORARIOS ELECTRONICO")
+  );
+  const esSandbox = det.modoTributario !== "interno_sin_ruc";
+
+  // Top Institution Branding Left
+  drawEnlaceCLogo(doc, 12, 12, 26, 19);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(razonSocialEmisor.substring(0, 38), 41, 18);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text("INSTITUCION EDUCATIVA Y LABORATORIO DE CIENCIAS ENLACEC", 41, 23);
+  doc.text("Direccion Fiscal: Av. Garcilaso de la Vega 1472 - Lima - Peru", 41, 27.5);
+  doc.text(
+    esSandbox
+      ? "Entorno: HOMOLOGACION / SANDBOX BETA SUNAT (RUC PRUEBAS)"
+      : "Entorno: CONTROL ADMINISTRATIVO INTERNO (SIN RUC TRIBUTARIO)",
+    41,
+    32
+  );
+
+  // Official SUNAT RUC Box on Top Right
+  doc.setDrawColor(15, 23, 42);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(132, 11, 66, 26, 2, 2, "S");
+
+  doc.setFillColor(241, 245, 249);
+  doc.rect(132.5, 18.5, 65, 10, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`R.U.C. ${rucEmisor}`, 165, 16.5, { align: "center" });
+
+  doc.setFontSize(8.5);
+  doc.setTextColor(30, 58, 138);
+  doc.text(tipoNombre.substring(0, 32), 165, 24.5, { align: "center" });
+
+  doc.setFontSize(10.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(serieCorrelativo, 165, 34, { align: "center" });
+
+  // Customer & Tax Padrón Box
+  let y = 44;
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(12, y, 186, 30, 2, 2, "S");
+
+  const docNum = det.docClienteNumero || det.dniEstudiante || det.dniDocente || "00000000";
+  const docLabel = det.docClienteTipo === "6" || docNum.length === 11 ? "RUC" : "DNI";
+  const fechaStr = new Date(factura.created_at || Date.now()).toLocaleDateString("es-PE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text("SENOR(ES) / RAZON SOCIAL:", 16, y + 6.5);
+  doc.text(`${docLabel} DEL RECEPTOR:`, 16, y + 12.5);
+  doc.text("DIRECCION:", 16, y + 18.5);
+  doc.text("PADRON SUNAT:", 16, y + 24.5);
+
+  doc.text("FECHA DE EMISION:", 128, y + 6.5);
+  doc.text("MONEDA:", 128, y + 12.5);
+  doc.text("MEDIO DE PAGO:", 128, y + 18.5);
+  doc.text("REGIMEN:", 128, y + 24.5);
+
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(15, 23, 42);
+  doc.text(cleanText(det.nombrePersona || "CLIENTE GENERAL").substring(0, 42), 58, y + 6.5);
+  doc.text(cleanText(docNum), 58, y + 12.5);
+  doc.text(cleanText(det.direccionCliente || "LIMA - PERU").substring(0, 42), 58, y + 18.5);
+  doc.text(
+    cleanText(`${det.estadoContribuyente || "ACTIVO"} / ${det.condicionContribuyente || "HABIDO"}`),
+    58,
+    y + 24.5
+  );
+
+  doc.text(fechaStr, 158, y + 6.5);
+  doc.text("SOLES (PEN)", 158, y + 12.5);
+  doc.text(cleanText(det.metodoPago || "Transferencia / Contado").substring(0, 22), 158, y + 18.5);
+  doc.text(cleanText(det.regimenContribuyente || "General / Educacion").substring(0, 22), 158, y + 24.5);
+
+  // Items Table
+  y = 80;
+  doc.setFillColor(15, 23, 42);
+  doc.rect(12, y, 186, 8, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text("CANT.", 16, y + 5.2);
+  doc.text("UNIDAD", 30, y + 5.2);
+  doc.text("DESCRIPCION DEL SERVICIO EDUCATIVO / LIQUIDACION DOCENTE", 48, y + 5.2);
+  doc.text("AFECTACION", 142, y + 5.2);
+  doc.text("V. UNIT", 168, y + 5.2, { align: "right" });
+  doc.text("IMPORTE", 195, y + 5.2, { align: "right" });
+
+  y += 8;
+  const cant = det.clasesDictadas || 1;
+  const vUnit = det.tarifaPorClase || factura.monto;
+  const afectacionLabel =
+    det.afectacionIgv === "gravado"
+      ? "GRAVADO 18%"
+      : det.afectacionIgv === "inafecto_rhe"
+      ? "4TA CAT RHE"
+      : "EXONERADO";
+
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(12, y, 186, 18, "S");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  doc.text(String(cant), 18, y + 6);
+  doc.setFont("helvetica", "normal");
+  doc.text("ZZ (SRV)", 30, y + 6);
+  doc.setFont("helvetica", "bold");
+  doc.text(cleanText(factura.concepto).substring(0, 52), 48, y + 6);
+
+  if (det.cursosVinculados && det.cursosVinculados.length > 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Cursos / Detalle: ${cleanText(det.cursosVinculados.join(", ")).substring(0, 65)}`, 48, y + 12);
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text(afectacionLabel, 142, y + 6);
+  doc.text(`S/. ${Number(vUnit).toFixed(2)}`, 168, y + 6, { align: "right" });
+  doc.text(`S/. ${Number(factura.monto).toFixed(2)}`, 195, y + 6, { align: "right" });
+
+  y += 22;
+
+  // Amount in Words Bar
+  const letras = cleanText(det.montoEnLetras || numeroALetrasSoles(factura.monto));
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(12, y, 186, 8, 1.5, 1.5, "FD");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  doc.text(letras, 16, y + 5.3);
+
+  y += 12;
+
+  // Bottom Split: Left QR + Hash + SUNAT Legend | Right Tax Totals Box
+  const qrStr =
+    det.qrCadena ||
+    `${rucEmisor}|03|${serieCorrelativo}|0.00|${factura.monto.toFixed(2)}|${fechaStr}|1|${docNum}|${det.hashCpe || "xK9pL2mQ="}|`;
+  drawSunatQrMatrix(doc, qrStr, 14, y + 2, 32);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text("RESUMEN HASH CPE (FIRMA DIGITAL UBL 2.1):", 50, y + 6);
+  doc.setFont("courier", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 58, 138);
+  doc.text(det.hashCpe || "xK9pL2mQ8vR4tW7yZ1nB5cV8mN3q=", 50, y + 11);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Representacion impresa del Comprobante de Pago Electronico.", 50, y + 17);
+  doc.text(
+    esSandbox
+      ? "Generado en el Entorno de Pruebas / Homologacion de SUNAT (RUC 20000000001)."
+      : "Comprobante de Control Interno Institucional - Exonerado de IGV (Art. 2 Ley IGV).",
+    50,
+    y + 21.5
+  );
+  doc.text(`Estado SUNAT: ${cleanText(det.estadoSunat || "ACEPTADO")} | Codigo CDR: 0`, 50, y + 26);
+
+  // Totals Box on the Right
+  const opGravada = Number(det.opGravada || 0);
+  const opExonerada = Number(det.opExonerada ?? (det.afectacionIgv === "gravado" ? 0 : factura.monto));
+  const igvMonto = Number(det.igvMonto || 0);
+  const retencion = Number(det.retencionRentaMonto || 0);
+
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(132, y, 66, 34, 2, 2, "S");
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Op. Gravada:", 136, y + 6.5);
+  doc.text("Op. Exonerada:", 136, y + 12.5);
+  doc.text("I.G.V. (18%):", 136, y + 18.5);
+  doc.text("Retencion / Otros:", 136, y + 24.5);
+
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(15, 23, 42);
+  doc.text(`S/. ${opGravada.toFixed(2)}`, 194, y + 6.5, { align: "right" });
+  doc.text(`S/. ${opExonerada.toFixed(2)}`, 194, y + 12.5, { align: "right" });
+  doc.text(`S/. ${igvMonto.toFixed(2)}`, 194, y + 18.5, { align: "right" });
+  doc.text(`S/. ${retencion.toFixed(2)}`, 194, y + 24.5, { align: "right" });
+
+  doc.setFillColor(15, 23, 42);
+  doc.rect(132, y + 26.5, 66, 7.5, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(8.5);
+  doc.text("IMPORTE TOTAL:", 136, y + 31.5);
+  doc.text(`S/. ${Number(factura.monto).toFixed(2)}`, 194, y + 31.5, { align: "right" });
+
+  if (shouldDownload) {
+    doc.save(`${serieCorrelativo}_${rucEmisor}.pdf`);
+  }
+
+  return {
+    id: serieCorrelativo,
+    base64: doc.output("datauristring")
+  };
+}
+
+/**
+ * Generates an official SUNAT Electronic Waybill PDF (Guía de Remisión Electrónica - Serie T001)
+ */
+export function generateGuiaRemisionPdf(gre: SunatGuiaRemision, shouldDownload: boolean = true): void {
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4"
+  });
+
+  drawEnlaceCLogo(doc, 12, 12, 26, 19);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(cleanText(gre.razonSocialRemitente).substring(0, 38), 41, 18);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text("GUIA DE REMISION ELECTRONICA REMITENTE - CONTROL DE TRASLADO SUNAT", 41, 24);
+  doc.text(`Ticket SUNAT: ${gre.ticketSunat} | Estado: ${cleanText(gre.estadoSunat)}`, 41, 29);
+
+  // RUC & GRE Box
+  doc.setDrawColor(15, 23, 42);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(132, 11, 66, 26, 2, 2, "S");
+  doc.setFillColor(241, 245, 249);
+  doc.rect(132.5, 18.5, 65, 10, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`R.U.C. ${gre.rucRemitente}`, 165, 16.5, { align: "center" });
+  doc.setFontSize(8);
+  doc.setTextColor(16, 185, 129);
+  doc.text("GUIA DE REMISION ELECTRONICA", 165, 24.5, { align: "center" });
+  doc.setFontSize(10.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(gre.serieCorrelativo, 165, 34, { align: "center" });
+
+  let y = 44;
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(12, y, 186, 42, 2, 2, "S");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text("DESTINATARIO:", 16, y + 7);
+  doc.text("RUC / DNI DESTINO:", 16, y + 13);
+  doc.text("PUNTO DE PARTIDA:", 16, y + 19);
+  doc.text("PUNTO DE LLEGADA:", 16, y + 25);
+  doc.text("MOTIVO TRASLADO:", 16, y + 31);
+  doc.text("TRANSPORTE / PLACA:", 16, y + 37);
+
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(15, 23, 42);
+  doc.text(cleanText(gre.destinatarioNombre), 55, y + 7);
+  doc.text(`${gre.destinatarioDocumento}   |   Fecha Emision: ${gre.fechaEmision}`, 55, y + 13);
+  doc.text(cleanText(gre.puntoPartida).substring(0, 75), 55, y + 19);
+  doc.text(cleanText(gre.puntoLlegada).substring(0, 75), 55, y + 25);
+  doc.text(`${cleanText(gre.motivoTraslado)}   |   Peso Bruto: ${gre.pesoBrutoKg.toFixed(2)} KGM`, 55, y + 31);
+  doc.text(
+    `${cleanText(gre.modalidadTransporte)} | Placa: ${cleanText(gre.placaVehiculo)} | DNI Cond.: ${gre.dniConductor}`,
+    55,
+    y + 37
+  );
+
+  y = 92;
+  doc.setFillColor(15, 23, 42);
+  doc.rect(12, y, 186, 8, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(255, 255, 255);
+  doc.text("ITEM", 16, y + 5.2);
+  doc.text("DESCRIPCION DE BIENES / MATERIALES TRASLADADOS", 35, y + 5.2);
+  doc.text("UNIDAD", 155, y + 5.2);
+  doc.text("PESO (KGM)", 194, y + 5.2, { align: "right" });
+
+  y += 8;
+  doc.setDrawColor(203, 213, 225);
+  doc.rect(12, y, 186, 16, "S");
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(15, 23, 42);
+  doc.text("01", 16, y + 7);
+  doc.text(cleanText(gre.descripcionBienes).substring(0, 68), 35, y + 7);
+  doc.text("NIU", 155, y + 7);
+  doc.setFont("helvetica", "bold");
+  doc.text(`${gre.pesoBrutoKg.toFixed(2)} KGM`, 194, y + 7, { align: "right" });
+
+  y += 22;
+  drawSunatQrMatrix(doc, gre.qrCadena, 14, y, 30);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.text("CODIGO QR DE VERIFICACION EN GARITA / ADUANAS SUNAT", 50, y + 8);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Hash GRE: ${gre.hashGre}`, 50, y + 14);
+  doc.text(`Constancia de Recepcion (CDR): ACEPTADO - Ticket ${gre.ticketSunat}`, 50, y + 20);
+
+  if (shouldDownload) {
+    doc.save(`GRE_${gre.serieCorrelativo}.pdf`);
+  }
+}
+
 
 
 

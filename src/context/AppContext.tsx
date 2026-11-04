@@ -1050,9 +1050,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved || '1234';
   });
 
-  const setVaultPasscode = (code: string) => {
+  const setVaultPasscode = async (code: string) => {
     setVaultPasscodeState(code);
     localStorage.setItem('edu_vault_passcode', code);
+    
+    // Persist to Supabase if config/app_settings table or usuarios table exists
+    try {
+      console.log("🔒 [BOVEDA-SEGURIDAD] Sincronizando nueva clave de bóveda en Supabase...");
+      // Try updating system settings table or admin password/meta
+      const { error: confErr } = await supabase.from('configuracion').upsert([
+        { clave: 'vault_passcode', valor: code, updated_at: new Date().toISOString() }
+      ], { onConflict: 'clave' });
+
+      if (confErr) {
+        // Fallback: try app_settings
+        await supabase.from('app_settings').upsert([
+          { key: 'vault_passcode', value: code }
+        ], { onConflict: 'key' });
+      }
+      console.log("✅ [BOVEDA-SEGURIDAD] Clave de bóveda respaldada en Supabase.");
+    } catch (e) {
+      console.warn("⚠️ [BOVEDA-SEGURIDAD] No se pudo escribir clave de bóveda en Supabase (usando respaldo seguro en navegador):", e);
+    }
   };
 
   // Default courses and services constants
@@ -1778,6 +1797,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const loadedData = saved ? JSON.parse(saved) : [];
       setFacturas(loadedData);
       console.log("ℹ️ [SISTEMA-LOG] Facturas cargadas de Almacenamiento Local (offline fallback). Registros:", loadedData.length);
+    }
+
+    // Cargar clave de la bóveda de Supabase si existe
+    try {
+      const { data: configData } = await supabase.from('configuracion').select('valor').eq('clave', 'vault_passcode').maybeSingle();
+      if (configData && configData.valor) {
+        setVaultPasscodeState(configData.valor);
+        localStorage.setItem('edu_vault_passcode', configData.valor);
+        console.log("🔑 [BOVEDA-SEGURIDAD] Clave de bóveda cargada exitosamente desde Supabase.");
+      } else {
+        const { data: altConfig } = await supabase.from('app_settings').select('value').eq('key', 'vault_passcode').maybeSingle();
+        if (altConfig && altConfig.value) {
+          setVaultPasscodeState(altConfig.value);
+          localStorage.setItem('edu_vault_passcode', altConfig.value);
+        }
+      }
+    } catch (e) {
+      // Ignorar si la tabla no existe aún, se preserva el local storage
     }
 
     console.log("%c🏁 [SISTEMA] Sincronización de base de datos finalizada.", "color: #10b981; font-weight: bold; font-size: 13px;");

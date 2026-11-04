@@ -24,8 +24,9 @@ import {
   uploadToCloudinaryClient 
 } from '../../services/clientServices';
 import { Student, Teacher, ResourceItem, FinancialTransaction, AccentColor } from '../../types';
-import { exportToCSV, exportStudentsToPDF, exportTransactionsToPDF } from '../../utils/exportUtils';
+import { exportToCSV, exportStudentsToPDF, exportTransactionsToPDF, exportServicesCatalogToPDF, exportTeachersToPDF } from '../../utils/exportUtils';
 import { generateStudentBoleta, generateTeacherBoleta } from '../../utils/pdfGenerator';
+import { consultarPadronSunat, validarComprobanteSunat, SunatPadronResult, SunatValidezResult } from '../../services/sunatService';
 import { getThemeClasses, ACCENT_COLORS_METADATA } from '../../lib/themeUtils';
 import { 
   ResponsiveContainer, 
@@ -80,7 +81,8 @@ import {
   FileDown,
   Receipt,
   Loader2,
-  CheckCircle
+  CheckCircle,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -247,6 +249,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
     subject: 'Matemáticas', salary: '1800', activeCourses: '10° Grado A', email: '', rating: 5, rol: 'profesor'
   });
 
+  // Student Advanced Filters
+  const [studentFilterService, setStudentFilterService] = useState<string>('todos');
+  const [studentFilterGrade, setStudentFilterGrade] = useState<string>('todos');
+  const [studentFilterDateFrom, setStudentFilterDateFrom] = useState<string>('');
+  const [studentFilterDateTo, setStudentFilterDateTo] = useState<string>('');
+  const [studentFilterStatus, setStudentFilterStatus] = useState<'todos' | 'activo' | 'inactivo'>('todos');
+  const [showStudentFilters, setShowStudentFilters] = useState<boolean>(false);
+
+  // Teacher Advanced Filters
+  const [teacherFilterSpecialty, setTeacherFilterSpecialty] = useState<string>('todos');
+  const [teacherFilterStatus, setTeacherFilterStatus] = useState<'todos' | 'activo' | 'inactivo'>('todos');
+  const [showTeacherFilters, setShowTeacherFilters] = useState<boolean>(false);
+
   // Multi-selection states for student/teacher deletion with long press drag-and-drop trash bin
   const [financeTimeFilter, setFinanceTimeFilter] = useState<'all' | 'month' | 'week' | 'day'>('all');
   const [studentSelectionMode, setStudentSelectionMode] = useState(false);
@@ -269,18 +284,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
 
   const [isSearchingDni, setIsSearchingDni] = useState(false);
   const [dniSearchError, setDniSearchError] = useState('');
+  const [sunatPadronData, setSunatPadronData] = useState<SunatPadronResult | null>(null);
+
+  // Finanzas SUNAT CPE Validator States
+  const [showFinanceCpeValidator, setShowFinanceCpeValidator] = useState(false);
+  const [finCpeRuc, setFinCpeRuc] = useState('20000000001');
+  const [finCpeTipo, setFinCpeTipo] = useState('01');
+  const [finCpeSerie, setFinCpeSerie] = useState('F001');
+  const [finCpeNumero, setFinCpeNumero] = useState('000001');
+  const [finCpeFecha, setFinCpeFecha] = useState(() => new Date().toISOString().split('T')[0]);
+  const [finCpeMonto, setFinCpeMonto] = useState('250.00');
+  const [isCheckingFinCpe, setIsCheckingFinCpe] = useState(false);
+  const [finCpeResult, setFinCpeResult] = useState<SunatValidezResult | null>(null);
 
   const handleLookupDni = async (dni: string, isForTeacher: boolean = false, isEdit: boolean = false) => {
-    if (!dni || dni.length !== 8) {
-      alert("Por favor, ingrese un DNI válido de 8 dígitos.");
+    const cleanDoc = (dni || '').trim().replace(/\D/g, '');
+    if (cleanDoc.length !== 8 && cleanDoc.length !== 11) {
+      alert("Por favor, ingrese un DNI válido de 8 dígitos o un RUC de 11 dígitos.");
       return;
     }
     setIsSearchingDni(true);
     setDniSearchError('');
     setExistingStudentData(null);
     setIsReniecAutofilled(false);
+    setSunatPadronData(null);
 
-    const cleanDni = dni.trim().replace(/\D/g, '');
+    const cleanDni = cleanDoc;
 
     try {
       if (!isForTeacher && !isEdit) {
@@ -351,36 +380,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
         }
       }
 
-      // SECOND: Call RENIEC API directly client-side
-      const data = await lookupReniecDniClient(cleanDni);
-      if (data.error) {
-        throw new Error(data.error);
-      }
-      
-      const personObj = (data && typeof data === 'object' && data.data && typeof data.data === 'object') ? data.data : data;
+      // SECOND: Query SUNAT / RENIEC Padrón API (Validates Activo, Habido, and Régimen)
+      const padron = await consultarPadronSunat(cleanDni);
+      setSunatPadronData(padron);
 
-      const nombreVal = (personObj.first_name || personObj.nombres || personObj.nombre || '').toString().trim();
+      let nombreVal = (padron.nombres || '').trim();
+      let apellidoVal = (padron.apellidos || '').trim();
 
-      let apellidoVal = '';
-      const paterno = personObj.first_last_name || personObj.apellido_paterno || personObj.apellidoPaterno || personObj.paterno || '';
-      const materno = personObj.second_last_name || personObj.apellido_materno || personObj.apellidoMaterno || personObj.materno || '';
-
-      if (paterno || materno) {
-        apellidoVal = `${paterno} ${materno}`.trim();
-      } else if (personObj.apellidos) {
-        apellidoVal = personObj.apellidos.toString().trim();
-      } else if (personObj.full_name || personObj.nombre_completo) {
-        const full = (personObj.full_name || personObj.nombre_completo).toString().trim();
-        if (nombreVal && full.includes(nombreVal)) {
-          apellidoVal = full.replace(nombreVal, '').trim();
+      if (!nombreVal && padron.nombreRazonSocial) {
+        const parts = padron.nombreRazonSocial.split(' ');
+        if (parts.length >= 3) {
+          nombreVal = parts.slice(0, -2).join(' ');
+          apellidoVal = parts.slice(-2).join(' ');
         } else {
-          apellidoVal = full;
+          nombreVal = padron.nombreRazonSocial;
+          apellidoVal = '';
         }
+      }
+
+      if (!nombreVal) {
+        const data = await lookupReniecDniClient(cleanDni);
+        const personObj = (data && typeof data === 'object' && data.data && typeof data.data === 'object') ? data.data : data;
+        nombreVal = (personObj.first_name || personObj.nombres || personObj.nombre || '').toString().trim();
+        const paterno = personObj.first_last_name || personObj.apellido_paterno || '';
+        const materno = personObj.second_last_name || personObj.apellido_materno || '';
+        apellidoVal = `${paterno} ${materno}`.trim() || (personObj.apellidos || '').toString().trim();
       }
 
       setIsReniecAutofilled(true);
 
-      // Update form fields with RENIEC API response
+      // Update form fields with SUNAT/RENIEC API response
       if (isForTeacher) {
         if (isEdit) {
           setEditTeacherData(prev => ({
@@ -416,9 +445,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
         }
       }
     } catch (err: any) {
-      console.error("DNI lookup error:", err);
+      console.error("DNI/RUC lookup error:", err);
       setIsReniecAutofilled(false);
-      setDniSearchError('No se encontró el DNI en RENIEC o el servicio no está disponible.');
+      setDniSearchError('No se encontró el documento en el Padrón SUNAT/RENIEC.');
     } finally {
       setIsSearchingDni(false);
     }
@@ -662,6 +691,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
       fetchDailySummary();
     }
   }, [activeTab, showAiSummary]);
+
+  // Vault Passcode management state in settings
+  const [inputVaultCode, setInputVaultCode] = useState(vaultPasscode || '1234');
+  const [vaultCodeMsg, setVaultCodeMsg] = useState('');
+  const [isSavingVaultCode, setIsSavingVaultCode] = useState(false);
+
+  React.useEffect(() => {
+    if (vaultPasscode) {
+      setInputVaultCode(vaultPasscode);
+    }
+  }, [vaultPasscode]);
 
   const renderMarkdown = (text: string) => {
     if (!text) return null;
@@ -1840,12 +1880,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
      MODULE: ESTUDIANTES (STUDENT CONTROL + REPORT CARD)
      ========================================================================= */
   const renderEstudiantesValue = () => {
-    // Filtered students
-    const filtered = students.filter(s => 
-      s.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
-      s.email.toLowerCase().includes(studentSearch.toLowerCase()) ||
-      s.grade.toLowerCase().includes(studentSearch.toLowerCase())
-    );
+    // Comprehensive Student Filtering
+    const filtered = students.filter(s => {
+      // 1. Text Search (Name, DNI, Email, Grade)
+      const fullName = (s.name || `${s.nombre || ''} ${s.apellido || ''}`).toLowerCase();
+      const dniStr = String(s.dni || '').toLowerCase();
+      const emailStr = (s.email || '').toLowerCase();
+      const gradeStr = String(s.grade || `${s.grado || ''}`).toLowerCase();
+      const searchMatch = !studentSearch || 
+        fullName.includes(studentSearch.toLowerCase()) ||
+        dniStr.includes(studentSearch.toLowerCase()) ||
+        emailStr.includes(studentSearch.toLowerCase()) ||
+        gradeStr.includes(studentSearch.toLowerCase());
+
+      if (!searchMatch) return false;
+
+      // 2. Service Filter
+      if (studentFilterService !== 'todos') {
+        if (s.servicioId !== studentFilterService) return false;
+      }
+
+      // 3. Grade Filter
+      if (studentFilterGrade !== 'todos') {
+        const studentGrade = String(s.grado || parseInt(s.grade || '0') || '');
+        if (studentGrade !== studentFilterGrade) return false;
+      }
+
+      // 4. Status Filter
+      if (studentFilterStatus !== 'todos') {
+        const isActive = s.estado !== undefined ? s.estado : (s.status === 'active');
+        if (studentFilterStatus === 'activo' && !isActive) return false;
+        if (studentFilterStatus === 'inactivo' && isActive) return false;
+      }
+
+      // 5. Date Matriculado Filter
+      if (studentFilterDateFrom || studentFilterDateTo) {
+        if (!s.created_at) return false;
+        const studentDate = s.created_at.split('T')[0];
+        if (studentFilterDateFrom && studentDate < studentFilterDateFrom) return false;
+        if (studentFilterDateTo && studentDate > studentFilterDateTo) return false;
+      }
+
+      return true;
+    });
+
+    const activeFilterCount = (studentFilterService !== 'todos' ? 1 : 0) +
+      (studentFilterGrade !== 'todos' ? 1 : 0) +
+      (studentFilterStatus !== 'todos' ? 1 : 0) +
+      (studentFilterDateFrom ? 1 : 0) +
+      (studentFilterDateTo ? 1 : 0);
 
     return (
       <div className="space-y-6">
@@ -1861,12 +1944,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               type="text"
               value={studentSearch}
               onChange={(e) => setStudentSearch(e.target.value)}
-              placeholder="Buscar por nombre, curso..."
+              placeholder="Buscar por nombre, DNI o curso..."
               className={`w-full pl-9 pr-4 py-2 text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-900 dark:text-white rounded-xl outline-none transition-all ${cl.ring}`}
             />
           </div>
           
-          <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => setShowStudentFilters(!showStudentFilters)}
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                showStudentFilters || activeFilterCount > 0
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-900/60 dark:text-indigo-300'
+                  : 'bg-gray-50 dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-750 border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-zinc-200'
+              }`}
+              title="Filtros avanzados de estudiantes"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filtros</span>
+              {activeFilterCount > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+
             <button
               id="btn-export-students-csv"
               type="button"
@@ -1874,42 +1976,176 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                 const csvHeaders = [
                   { label: 'ID', key: (s: Student) => s.id },
                   { label: 'Nombre Completo', key: (s: Student) => s.name || `${s.nombre || ''} ${s.apellido || ''}`.trim() },
+                  { label: 'DNI', key: (s: Student) => s.dni || '' },
                   { label: 'Correo Electrónico', key: (s: Student) => s.email || '' },
                   { label: 'Grado', key: (s: Student) => s.grade || `${s.grado || ''}° Grado ${s.nivel || ''}`.trim() },
-                  { label: 'Sección', key: (s: Student) => s.section || '' },
-                  { label: 'Nombre Apoderado', key: (s: Student) => s.parentName || '' },
+                  { label: 'Servicio', key: (s: Student) => servicios.find(srv => srv.id === s.servicioId)?.nombre || 'Sin servicio' },
+                  { label: 'Estado', key: (s: Student) => (s.estado !== false && s.status !== 'inactive') ? 'Activo' : 'Inactivo' },
+                  { label: 'Fecha Matrícula', key: (s: Student) => s.created_at ? s.created_at.split('T')[0] : '' },
                   { label: 'Teléfono Apoderado', key: (s: Student) => s.parentPhone || String(s.contacto || '') },
                   { label: 'Balance Pendiente', key: (s: Student) => `S/. ${s.balance || 0}` }
                 ];
-                exportToCSV(filtered, csvHeaders, 'estudiantes_colegio_tesla.csv');
+                exportToCSV(filtered, csvHeaders, 'estudiantes_filtrados.csv');
               }}
-              className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-gray-700 dark:text-zinc-200 bg-gray-50 dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-750 border border-gray-200 dark:border-zinc-700 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+              className="px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-zinc-200 bg-gray-50 dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-750 border border-gray-200 dark:border-zinc-700 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              Exportar CSV
+              CSV
             </button>
 
             <button
               id="btn-export-students-pdf"
               type="button"
-              onClick={() => exportStudentsToPDF(filtered, 'Colegio Tesla')}
-              className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-gray-700 dark:text-zinc-200 bg-gray-50 dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-750 border border-gray-200 dark:border-zinc-700 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+              onClick={() => exportStudentsToPDF(filtered, 'Colegio EnlaceC')}
+              className="px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-zinc-200 bg-gray-50 dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-750 border border-gray-200 dark:border-zinc-700 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+              title="Exportar la lista con los filtros aplicados en formato PDF"
             >
               <FileDown className="w-4 h-4 text-rose-600 dark:text-rose-400" />
-              Exportar PDF
+              Exportar PDF ({filtered.length})
             </button>
 
             <button
               id="btn-add-student-trigger"
               type="button"
               onClick={() => setShowAddStudentModal(true)}
-              className={`w-full sm:w-auto px-4 py-2 text-xs font-bold text-white rounded-xl ${cl.primaryBg} ${cl.primaryHoverBg} transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer`}
+              className={`px-4 py-2 text-xs font-bold text-white rounded-xl ${cl.primaryBg} ${cl.primaryHoverBg} transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer`}
             >
               <UserPlus className="w-4 h-4" />
               Matricular Estudiante
             </button>
           </div>
         </div>
+
+        {/* Advanced Filters Expandable Drawer for Students */}
+        <AnimatePresence>
+          {showStudentFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="bg-white dark:bg-zinc-900 border border-indigo-150 dark:border-indigo-950/60 p-4.5 rounded-2xl shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-100 dark:border-zinc-800 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-100">
+                      Filtros Avanzados de Estudiantes
+                    </span>
+                  </div>
+                  {activeFilterCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudentFilterService('todos');
+                        setStudentFilterGrade('todos');
+                        setStudentFilterDateFrom('');
+                        setStudentFilterDateTo('');
+                        setStudentFilterStatus('todos');
+                      }}
+                      className="text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                    >
+                      Limpiar Filtros
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5 text-xs">
+                  {/* Filter: Servicio */}
+                  <div>
+                    <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                      Servicio Académico
+                    </label>
+                    <select
+                      value={studentFilterService}
+                      onChange={(e) => setStudentFilterService(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-800 dark:text-zinc-200 rounded-xl outline-none font-semibold text-xs"
+                    >
+                      <option value="todos">Todos los servicios</option>
+                      {servicios.map((s) => (
+                        <option key={s.id} value={s.id}>{s.nombre}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filter: Grado */}
+                  <div>
+                    <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                      Grado
+                    </label>
+                    <select
+                      value={studentFilterGrade}
+                      onChange={(e) => setStudentFilterGrade(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-800 dark:text-zinc-200 rounded-xl outline-none font-semibold text-xs"
+                    >
+                      <option value="todos">Todos los grados</option>
+                      <option value="1">1° Grado</option>
+                      <option value="2">2° Grado</option>
+                      <option value="3">3° Grado</option>
+                      <option value="4">4° Grado</option>
+                      <option value="5">5° Grado</option>
+                      <option value="6">6° Grado</option>
+                      <option value="10">10° Grado</option>
+                      <option value="11">11° Grado</option>
+                    </select>
+                  </div>
+
+                  {/* Filter: Estado */}
+                  <div>
+                    <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                      Estado Matrícula
+                    </label>
+                    <select
+                      value={studentFilterStatus}
+                      onChange={(e) => setStudentFilterStatus(e.target.value as any)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-800 dark:text-zinc-200 rounded-xl outline-none font-semibold text-xs"
+                    >
+                      <option value="todos">Todos los estados</option>
+                      <option value="activo">Solo Activos</option>
+                      <option value="inactivo">Solo Inactivos</option>
+                    </select>
+                  </div>
+
+                  {/* Filter: Fecha Matriculado (Rango) */}
+                  <div>
+                    <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                      Fecha Matriculado (Desde / Hasta)
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        value={studentFilterDateFrom}
+                        onChange={(e) => setStudentFilterDateFrom(e.target.value)}
+                        className="w-full p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-800 dark:text-zinc-200 rounded-lg outline-none text-[11px] font-mono"
+                        title="Fecha inicial"
+                      />
+                      <span className="text-gray-400 text-xs">-</span>
+                      <input
+                        type="date"
+                        value={studentFilterDateTo}
+                        onChange={(e) => setStudentFilterDateTo(e.target.value)}
+                        className="w-full p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-800 dark:text-zinc-200 rounded-lg outline-none text-[11px] font-mono"
+                        title="Fecha final"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-gray-500 pt-2 border-t border-gray-100 dark:border-zinc-800/80">
+                  <span>Mostrando <strong>{filtered.length}</strong> de <strong>{students.length}</strong> estudiantes.</span>
+                  <button
+                    type="button"
+                    onClick={() => exportStudentsToPDF(filtered, 'Colegio EnlaceC')}
+                    className="flex items-center gap-1 font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                  >
+                    <FileDown className="w-3.5 h-3.5" />
+                    Descargar reporte PDF del filtro actual
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {studentSelectionMode && (
           <motion.div
@@ -3076,25 +3312,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                           </button>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-between p-3 bg-indigo-500/5 dark:bg-indigo-500/10 rounded-xl border border-indigo-500/15">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-indigo-500" />
-                            <div className="text-left">
-                              <span className="block text-[9px] font-extrabold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">DNI Consultado</span>
-                              <span className="text-xs font-bold text-gray-800 dark:text-zinc-200 font-mono">DNI: {newStudentData.dni || 'No registrado'}</span>
+                        <div className="flex flex-col gap-1.5 p-3 bg-indigo-500/5 dark:bg-indigo-500/10 rounded-xl border border-indigo-500/15">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="w-4 h-4 text-indigo-500" />
+                              <div className="text-left">
+                                <span className="block text-[9px] font-extrabold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Padrón SUNAT / RENIEC Consultado</span>
+                                <span className="text-xs font-bold text-gray-800 dark:text-zinc-200 font-mono">Doc: {newStudentData.dni || 'No registrado'}</span>
+                              </div>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDniStepCompleted(false);
+                                setIsReniecAutofilled(false);
+                                setDniSearchError('');
+                              }}
+                              className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                            >
+                              Consultar otro DNI/RUC
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDniStepCompleted(false);
-                              setIsReniecAutofilled(false);
-                              setDniSearchError('');
-                            }}
-                            className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                          >
-                            Consultar otro DNI
-                          </button>
+                          {sunatPadronData && (
+                            <div className="text-[10px] text-gray-600 dark:text-zinc-300 pt-1 border-t border-indigo-500/10 flex flex-wrap gap-x-2">
+                              <span>Estado: <strong className="text-emerald-600 dark:text-emerald-400">{sunatPadronData.estado}</strong></span>
+                              <span>·</span>
+                              <span>Condición: <strong className="text-emerald-600 dark:text-emerald-400">{sunatPadronData.condicion}</strong></span>
+                              <span>·</span>
+                              <span>Régimen: <strong>{sunatPadronData.regimen}</strong></span>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -3801,10 +4048,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
      MODULE: DOCENTES (TEACHERS DIRECTORY CONTROL)
      ========================================================================= */
   const renderDocentesValue = () => {
-    const filtered = teachers.filter(t => 
-      t.name.toLowerCase().includes(teacherSearch.toLowerCase()) ||
-      t.subject.toLowerCase().includes(teacherSearch.toLowerCase())
-    );
+    const teacherSpecialties = Array.from(
+      new Set(teachers.map(t => (t.subject || t.especialidad || '').trim()).filter(Boolean))
+    ).sort();
+
+    const filtered = teachers.filter(t => {
+      const q = teacherSearch.toLowerCase();
+      const matchSearch = 
+        t.name.toLowerCase().includes(q) ||
+        (t.subject && t.subject.toLowerCase().includes(q)) ||
+        (t.especialidad && t.especialidad.toLowerCase().includes(q)) ||
+        (t.email && t.email.toLowerCase().includes(q)) ||
+        (t.phone && t.phone.toLowerCase().includes(q));
+
+      const subj = (t.subject || t.especialidad || '').toLowerCase();
+      const matchSpecialty = teacherFilterSpecialty === 'todos' || subj === teacherFilterSpecialty.toLowerCase();
+
+      const isActivo = t.estado !== false && t.status !== 'inactive';
+      const matchStatus = teacherFilterStatus === 'todos' ||
+        (teacherFilterStatus === 'activo' ? isActivo : !isActivo);
+
+      return matchSearch && matchSpecialty && matchStatus;
+    });
+
+    const hasActiveTeacherFilters = teacherFilterSpecialty !== 'todos' || teacherFilterStatus !== 'todos';
 
     return (
       <div className="space-y-6">
@@ -3845,7 +4112,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
             />
           </div>
           
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
+            {/* Filter Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setShowTeacherFilters(!showTeacherFilters)}
+              className={`px-3 py-2 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 cursor-pointer ${
+                showTeacherFilters || hasActiveTeacherFilters
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-800 dark:text-indigo-300'
+                  : 'bg-white dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-zinc-300 hover:bg-gray-50'
+              }`}
+              title="Filtros avanzados de docentes"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filtros</span>
+              {hasActiveTeacherFilters && (
+                <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
+              )}
+            </button>
+
             {/* View Switcher toggle */}
             <div className="flex items-center bg-gray-100 dark:bg-zinc-800 p-1 rounded-lg border border-gray-200/60 dark:border-zinc-700">
               <button
@@ -3870,13 +4155,97 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               id="btn-add-teacher-trigger"
               type="button"
               onClick={() => setShowAddTeacherModal(true)}
-              className={`px-4 py-2 text-xs font-bold text-white rounded-xl ${cl.primaryBg} ${cl.primaryHoverBg} transition-all flex items-center justify-center gap-2 shadow-sm`}
+              className={`px-4 py-2 text-xs font-bold text-white rounded-xl ${cl.primaryBg} ${cl.primaryHoverBg} transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer`}
             >
               <Plus className="w-4 h-4" />
               Registrar Nuevo Docente
             </button>
           </div>
         </div>
+
+        {/* Expandable Advanced Filters Drawer for Teachers */}
+        <AnimatePresence>
+          {showTeacherFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="bg-white dark:bg-zinc-900 border border-gray-150 dark:border-zinc-800 rounded-2xl p-4 shadow-sm space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <h4 className="text-xs font-extrabold text-gray-800 dark:text-zinc-200 uppercase tracking-wider">
+                      Filtros de Docentes (Especialidad y Estado)
+                    </h4>
+                  </div>
+                  {hasActiveTeacherFilters && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeacherFilterSpecialty('todos');
+                        setTeacherFilterStatus('todos');
+                      }}
+                      className="text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                    >
+                      Limpiar Filtros
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {/* Filter: Especialidad */}
+                  <div>
+                    <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                      Especialidad / Materia
+                    </label>
+                    <select
+                      value={teacherFilterSpecialty}
+                      onChange={(e) => setTeacherFilterSpecialty(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-800 dark:text-zinc-200 rounded-xl outline-none font-semibold text-xs"
+                    >
+                      <option value="todos">Todas las especialidades</option>
+                      {teacherSpecialties.map((spec) => (
+                        <option key={spec} value={spec}>
+                          {spec}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filter: Estado */}
+                  <div>
+                    <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                      Estado Laboral
+                    </label>
+                    <select
+                      value={teacherFilterStatus}
+                      onChange={(e) => setTeacherFilterStatus(e.target.value as any)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-800 dark:text-zinc-200 rounded-xl outline-none font-semibold text-xs"
+                    >
+                      <option value="todos">Todos los estados</option>
+                      <option value="activo">Solo Activos</option>
+                      <option value="inactivo">Solo Inactivos</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-gray-500 pt-2 border-t border-gray-100 dark:border-zinc-800/80">
+                  <span>Mostrando <strong>{filtered.length}</strong> de <strong>{teachers.length}</strong> docentes.</span>
+                  <button
+                    type="button"
+                    onClick={() => exportTeachersToPDF(filtered, 'Colegio EnlaceC')}
+                    className="flex items-center gap-1 font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                  >
+                    <FileDown className="w-3.5 h-3.5" />
+                    Descargar reporte PDF del filtro actual
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {teacherSelectionMode && (
           <motion.div
@@ -4604,19 +4973,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                 </div>
 
                 <form onSubmit={handleAddTeacher} className="space-y-4">
-                  {/* DNI Consultation (RENIEC / Decolecta) */}
+                  {/* DNI / RUC Consultation (Padrón SUNAT / RENIEC) */}
                   <div className="bg-gray-50 dark:bg-zinc-800/80 p-3.5 rounded-xl border border-gray-150 dark:border-zinc-700">
                     <label className="block text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1.5">
-                      Consulta de Identidad (RENIEC / Decolecta API)
+                      Consulta de Padrón SUNAT / RENIEC (DNI o RUC 10)
                     </label>
                     <div className="flex gap-2">
                       <input
                         type="text"
-                        maxLength={8}
-                        placeholder="Ingresar DNI (8 dígitos)"
+                        maxLength={11}
+                        placeholder="DNI (8 dígitos) o RUC 10 (11 dígitos)"
                         value={newTeacherData.dni}
                         onChange={(e) => setNewTeacherData({ ...newTeacherData, dni: e.target.value.replace(/\D/g, '') })}
-                        className={`flex-1 p-2 py-2 text-xs bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 text-gray-900 dark:text-zinc-100 placeholder-gray-400 dark:placeholder-zinc-500 rounded-lg outline-none transition-all ${cl.ring}`}
+                        className={`flex-1 p-2 py-2 text-xs bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 text-gray-900 dark:text-zinc-100 placeholder-gray-400 dark:placeholder-zinc-500 rounded-lg outline-none font-mono transition-all ${cl.ring}`}
                       />
                       <button
                         type="button"
@@ -4629,14 +4998,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                         ) : (
                           <Search className="w-3.5 h-3.5" />
                         )}
-                        Consultar
+                        Consultar SUNAT
                       </button>
                     </div>
                     {dniSearchError && (
                       <p className="text-[10px] text-rose-500 font-semibold mt-1.5">{dniSearchError}</p>
                     )}
+                    {sunatPadronData && (
+                      <div className="mt-2 pt-1.5 border-t border-gray-200 dark:border-zinc-700 text-[10px] text-gray-700 dark:text-zinc-300 flex flex-wrap gap-x-2">
+                        <span>Estado: <strong className="text-emerald-600 dark:text-emerald-400">{sunatPadronData.estado}</strong></span>
+                        <span>·</span>
+                        <span>Condición: <strong className="text-emerald-600 dark:text-emerald-400">{sunatPadronData.condicion}</strong></span>
+                        <span>·</span>
+                        <span>Régimen: <strong>{sunatPadronData.regimen}</strong></span>
+                      </div>
+                    )}
                     <p className="text-[9px] text-gray-400 dark:text-zinc-400 font-medium mt-1.5">
-                      * Al consultar se auto-completarán los nombres y apellidos del profesor utilizando la API de Decolecta.
+                      * Valida que el docente esté Activo y Habido en SUNAT para emisión de Recibos por Honorarios.
                     </p>
                   </div>
 
@@ -5592,10 +5970,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
         {/* Operations cash flow trigger panel */}
         <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div>
-            <h3 className="text-sm font-bold text-gray-800 dark:text-zinc-200">Terminal de Caja Escolar</h3>
-            <p className="text-xs text-gray-500">Agrega ingresos por donación/pagos o retira dinero para pagos a docentes u operacionales.</p>
+            <h3 className="text-sm font-bold text-gray-800 dark:text-zinc-200">Terminal de Caja Escolar y Validación Tributaria SUNAT</h3>
+            <p className="text-xs text-gray-500">Agrega ingresos/egresos o verifica la validez de facturas y boletas de proveedores en SUNAT antes de contabilizarlas.</p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                setFinCpeResult(null);
+                setShowFinanceCpeValidator(!showFinanceCpeValidator);
+              }}
+              className="px-4 py-2.5 text-xs font-bold bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 rounded-xl transition-all flex items-center gap-2 cursor-pointer border border-indigo-200/50 dark:border-indigo-900/40"
+            >
+              <CheckCircle className="w-4 h-4" />
+              Validar CPE en SUNAT
+            </button>
             <button
               id="btn-withdraw-money"
               type="button"
@@ -5603,7 +5992,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                 setShowFinanceModal('egreso');
                 setFinanceForm({ amount: '', concept: '', category: 'Salario Docente', targetId: '' });
               }}
-              className="px-5 py-2.5 text-xs font-bold bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/40 rounded-xl transition-all flex items-center gap-2"
+              className="px-5 py-2.5 text-xs font-bold bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/40 rounded-xl transition-all flex items-center gap-2 cursor-pointer"
             >
               <ArrowDownRight className="w-4 h-4" />
               Retirar / Registrar Egreso
@@ -5615,13 +6004,163 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                 setShowFinanceModal('ingreso');
                 setFinanceForm({ amount: '', concept: '', category: 'Colegiatura', targetId: '' });
               }}
-              className={`px-5 py-2.5 text-xs font-bold text-white ${cl.primaryBg} ${cl.primaryHoverBg} rounded-xl transition-all flex items-center gap-2 shadow-sm`}
+              className={`px-5 py-2.5 text-xs font-bold text-white ${cl.primaryBg} ${cl.primaryHoverBg} rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer`}
             >
               <ArrowUpRight className="w-4 h-4" />
               Ingresar / Registrar Ingreso
             </button>
           </div>
         </div>
+
+        {/* Collapsible SUNAT CPE Authenticity Validator in Finanzas */}
+        <AnimatePresence>
+          {showFinanceCpeValidator && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-indigo-200/70 dark:border-zinc-800 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-100 dark:border-zinc-800 pb-3">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                      Consulta de Validez de Comprobantes de Pago (API SUNAT)
+                    </h4>
+                    <p className="text-[11px] text-gray-500">
+                      Verifica si una factura, boleta o recibo por honorarios entregado por un proveedor o docente es legal, está activo/habido y no fue anulado.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowFinanceCpeValidator(false)}
+                    className="p-1 text-gray-400 hover:text-gray-600 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">RUC Emisor</label>
+                    <input
+                      type="text"
+                      maxLength={11}
+                      value={finCpeRuc}
+                      onChange={(e) => setFinCpeRuc(e.target.value.replace(/\D/g, ''))}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Tipo CPE</label>
+                    <select
+                      value={finCpeTipo}
+                      onChange={(e) => setFinCpeTipo(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl font-bold"
+                    >
+                      <option value="01">01 - Factura</option>
+                      <option value="03">03 - Boleta</option>
+                      <option value="02">02 - RHE</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Serie</label>
+                    <input
+                      type="text"
+                      value={finCpeSerie}
+                      onChange={(e) => setFinCpeSerie(e.target.value.toUpperCase())}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Número</label>
+                    <input
+                      type="text"
+                      value={finCpeNumero}
+                      onChange={(e) => setFinCpeNumero(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Fecha Emisión</label>
+                    <input
+                      type="date"
+                      value={finCpeFecha}
+                      onChange={(e) => setFinCpeFecha(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Monto (S/.)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={finCpeMonto}
+                      onChange={(e) => setFinCpeMonto(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <button
+                    type="button"
+                    disabled={isCheckingFinCpe}
+                    onClick={async () => {
+                      setIsCheckingFinCpe(true);
+                      try {
+                        const res = await validarComprobanteSunat({
+                          rucEmisor: finCpeRuc,
+                          tipoComprobante: finCpeTipo,
+                          serie: finCpeSerie,
+                          numero: finCpeNumero,
+                          fechaEmision: finCpeFecha,
+                          montoTotal: parseFloat(finCpeMonto) || 0
+                        });
+                        setFinCpeResult(res);
+                      } finally {
+                        setIsCheckingFinCpe(false);
+                      }
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    {isCheckingFinCpe ? 'Consultando SUNAT...' : 'Verificar Autenticidad en SUNAT'}
+                  </button>
+
+                  {finCpeResult && finCpeResult.esValido && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowFinanceModal('egreso');
+                        setFinanceForm({
+                          amount: finCpeMonto,
+                          concept: `CPE Validado SUNAT ${finCpeResult.serieCorrelativo} (RUC ${finCpeRuc})`,
+                          category: 'Gastos Operativos',
+                          targetId: ''
+                        });
+                      }}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+                    >
+                      Contabilizar como Gasto Verificado
+                    </button>
+                  )}
+                </div>
+
+                {finCpeResult && (
+                  <div className={`p-3 rounded-xl border text-xs ${
+                    finCpeResult.esValido
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                  }`}>
+                    <p className="font-bold">Resultado SUNAT: {finCpeResult.estadoComprobante}</p>
+                    <p className="text-[11px] mt-0.5">{finCpeResult.mensaje}</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Transactions log sheet */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm overflow-hidden">
@@ -6135,20 +6674,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
             <div className="space-y-1">
               <span className="text-xs font-bold block text-gray-800 dark:text-zinc-200">Clave de Acceso a Bóveda de Facturas</span>
               <p className="text-[10px] text-gray-400 dark:text-zinc-500 leading-tight">
-                Establece la clave de seguridad requerida para entrar a la Bóveda de Facturas y visualizar los comprobantes cargados en Cloudinary.
+                Establece la clave de seguridad requerida para entrar a la Bóveda de Facturas y visualizar los comprobantes cargados en Cloudinary. Si la clave cambia, la clave por defecto 1234 quedará automáticamente invalidada y no permitirá el ingreso (seguridad real).
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5">
               <input
                 type="text"
                 maxLength={12}
-                value={vaultPasscode}
-                onChange={(e) => setVaultPasscode(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
+                value={inputVaultCode}
+                onChange={(e) => setInputVaultCode(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
                 placeholder="Ej. 1234"
-                className="w-full max-w-[200px] px-3 py-1.5 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg text-xs font-mono font-bold tracking-widest text-slate-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full max-w-[200px] px-3 py-2 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg text-xs font-mono font-bold tracking-widest text-slate-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
-              <span className="text-[10px] text-gray-400 font-medium italic">Sugerido usar solo letras y números.</span>
+              <button
+                type="button"
+                disabled={isSavingVaultCode || !inputVaultCode.trim()}
+                onClick={async () => {
+                  if (inputVaultCode.trim().length < 4) {
+                    setVaultCodeMsg('La clave debe tener mínimo 4 caracteres.');
+                    return;
+                  }
+                  setIsSavingVaultCode(true);
+                  try {
+                    await setVaultPasscode(inputVaultCode.trim());
+                    setVaultCodeMsg('✅ Clave de Bóveda actualizada y guardada en base de datos.');
+                    addNotification({
+                      title: '🔐 Seguridad de Bóveda',
+                      content: `Nueva clave registrada en la base de datos (${inputVaultCode.trim()}). La clave anterior ya no permitirá el ingreso.`,
+                      type: 'success'
+                    });
+                    setTimeout(() => setVaultCodeMsg(''), 4000);
+                  } catch (e: any) {
+                    setVaultCodeMsg('Error guardando clave: ' + e.message);
+                  } finally {
+                    setIsSavingVaultCode(false);
+                  }
+                }}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                {isSavingVaultCode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                Guardar Nueva Clave
+              </button>
             </div>
+            {vaultCodeMsg && (
+              <p className={`text-xs font-bold ${vaultCodeMsg.includes('✅') ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}`}>
+                {vaultCodeMsg}
+              </p>
+            )}
           </div>
         </div>
 
@@ -6405,14 +6977,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                 Los servicios son paquetes comerciales que agrupan cursos individuales. Vincula cursos y asigna profesores calificados para su dictado.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowAddServiceModal(true)}
-              className={`mt-4 w-full py-2.5 text-xs font-bold text-white rounded-xl bg-gradient-to-r from-indigo-650 to-purple-600 hover:from-indigo-700 hover:to-purple-750 transition-all flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/15`}
-            >
-              <Plus className="w-4 h-4" />
-              Crear Nuevo Servicio
-            </button>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddServiceModal(true)}
+                className={`w-full py-2.5 text-xs font-bold text-white rounded-xl bg-gradient-to-r from-indigo-650 to-purple-600 hover:from-indigo-700 hover:to-purple-750 transition-all flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/15 cursor-pointer`}
+              >
+                <Plus className="w-4 h-4" />
+                Crear Nuevo Servicio
+              </button>
+              <button
+                type="button"
+                onClick={() => exportServicesCatalogToPDF(servicios, cursos, servicioCursos, teachers, servicioProfesores, 'Colegio EnlaceC')}
+                className="w-full py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/40 border border-rose-200/60 dark:border-rose-900/40 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <FileDown className="w-4 h-4" />
+                Exportar Catálogo en PDF
+              </button>
+            </div>
           </div>
 
           <div className="bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-gray-150 dark:border-zinc-800 shadow-sm flex flex-col justify-between">
@@ -6453,15 +7035,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                 className={`w-full pl-9 pr-4 py-2 text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-950 dark:text-zinc-100 rounded-xl outline-none transition-all ${cl.ring}`}
               />
             </div>
-            {serviceSearch && (
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              {serviceSearch && (
+                <button
+                  type="button"
+                  onClick={() => setServiceSearch('')}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                >
+                  Limpiar Filtros
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setServiceSearch('')}
-                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                onClick={() => exportServicesCatalogToPDF(servicios, cursos, servicioCursos, teachers, servicioProfesores, 'Colegio EnlaceC')}
+                className="px-3.5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+                title="Descargar catálogo en formato PDF con servicios, precios y cursos"
               >
-                Limpiar Filtros
+                <FileDown className="w-4 h-4" />
+                <span>Exportar Catálogo PDF</span>
               </button>
-            )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

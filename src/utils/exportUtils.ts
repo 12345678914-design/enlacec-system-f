@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Student, FinancialTransaction } from '../types';
-import { generateAcademicReportPDF, generateFinancialReportPDF } from './pdfGenerator';
+import { Student, Teacher, FinancialTransaction } from '../types';
+import { generateAcademicReportPDF, generateFinancialReportPDF, generateServicesCatalogPDF, generateTeachersRosterPDF } from './pdfGenerator';
 
 export interface CSVHeader<T> {
   label: string;
@@ -71,3 +71,26 @@ export function exportTransactionsToPDF(
   return generateFinancialReportPDF(transactions, schoolName, activeTeacherName, true);
 }
 
+/**
+ * Helper to export services and courses catalog in formatted PDF
+ */
+export function exportServicesCatalogToPDF(
+  servicios: any[],
+  cursos: any[],
+  servicioCursos: any[],
+  teachers: any[] = [],
+  servicioProfesores: any[] = [],
+  schoolName: string = "Academia EnlaceC"
+) {
+  return generateServicesCatalogPDF(servicios, cursos, servicioCursos, teachers, servicioProfesores, schoolName, true);
+}
+
+/**
+ * Helper to export teachers list to formatted downloadable PDF
+ */
+export function exportTeachersToPDF(
+  teachers: Teacher[],
+  schoolName: string = "Colegio EnlaceC"
+) {
+  return generateTeachersRosterPDF(teachers, schoolName, true);
+}

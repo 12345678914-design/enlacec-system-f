@@ -68,12 +68,16 @@ export interface Teacher {
   name?: string;
   email?: string;
   subject?: string;  // Specialization
+  especialidad?: string;
   phone?: string;
   salary?: number;   // Monthly salary
+  hourlyRate?: number;
   paymentStatus?: 'paid' | 'pending';
   activeCourses?: string[];
   avatarUrl?: string;
   rating?: number;   // Evaluation out of 5
+  estado?: boolean;
+  status?: 'active' | 'inactive' | string;
 }
 
 export interface ResourceItem {
@@ -212,7 +216,35 @@ export interface Factura {
     tarifaPorClase?: number;
     cursosVinculados?: string[];
     metodoPago?: string;
+    // SUNAT Electronic Billing Fields (Hybrid Sandbox Beta + Internal)
+    modoTributario?: 'sandbox_beta' | 'interno_sin_ruc';
+    tipoComprobanteCodigo?: '01' | '03' | '02' | 'NV' | 'LQ'; // 01: Factura, 03: Boleta, 02: RHE, NV: Nota Venta, LQ: Liquidación
+    tipoComprobanteNombre?: string;
+    serieCorrelativo?: string; // e.g., B001-000001, F001-000001, NV01-000001, E001-000001
+    rucEmisor?: string; // Default 20000000001 in Sandbox Beta
+    razonSocialEmisor?: string;
+    docClienteTipo?: '1' | '6'; // 1: DNI, 6: RUC
+    docClienteNumero?: string;
+    direccionCliente?: string;
+    estadoContribuyente?: string; // ACTIVO / BAJA
+    condicionContribuyente?: string; // HABIDO / NO HABIDO
+    regimenContribuyente?: string; // RMT, RER, RG, RUS, Persona Natural
+    afectacionIgv?: 'exonerado' | 'gravado' | 'inafecto_rhe';
+    opGravada?: number;
+    opExonerada?: number;
+    igvMonto?: number;
+    retencionRentaMonto?: number;
+    montoEnLetras?: string;
+    hashCpe?: string;
+    qrCadena?: string;
+    estadoSunat?: 'ACEPTADO' | 'CONTROL_INTERNO' | 'BAJA_COMUNICADA' | 'RESUMEN_ENVIADO';
+    codigoRespuestaSunat?: string;
+    mensajeSunat?: string;
+    ticketSunat?: string;
+    motivoBaja?: string;
+    fechaBaja?: string;
   };
 }
+
 
 

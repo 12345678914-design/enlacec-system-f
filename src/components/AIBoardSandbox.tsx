@@ -1795,202 +1795,8 @@ export const AIBoardSandbox: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Main Sandbox Interactive Split Workspace */}
+        {/* Main Sandbox Interactive Split Workspace */}
       <div className="flex-1 flex min-h-0 relative select-none">
-        
-        {/* Left Floating Toolbar / Element Drawer superimposed on top of the chalkboard */}
-        <AnimatePresence>
-          {isWidgetsPanelOpen && (
-            <motion.div
-              initial={{ opacity: 0, x: -60, scale: 0.95 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: -60, scale: 0.95 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              className="absolute left-4 top-4 bottom-4 w-56 z-30 bg-white/80 dark:bg-zinc-900/95 backdrop-blur-xl border border-gray-200/50 dark:border-zinc-800 rounded-3xl p-4 flex flex-col gap-4 overflow-y-auto overflow-x-hidden text-left select-none shadow-2xl"
-            >
-              {/* Section: Annotations */}
-              <div className="space-y-2">
-                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Documental</span>
-                <button
-                  id="sidebar-add-note"
-                  type="button"
-                  onClick={() => addPreset('text')}
-                  className="w-full flex items-center gap-2 px-3 py-2 bg-white/70 hover:bg-indigo-50 dark:bg-zinc-850 dark:hover:bg-indigo-950/30 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer group"
-                >
-                  <div className="p-1 px-1.5 rounded-lg bg-gray-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900">
-                    <FileText className="w-3.5 h-3.5" />
-                  </div>
-                  <span>Anotación con Tarjeta</span>
-                </button>
-                <button
-                  id="sidebar-add-free-text"
-                  type="button"
-                  onClick={() => addPreset('free_text')}
-                  className="w-full flex items-center gap-2 px-3 py-2 bg-white/70 hover:bg-violet-50 dark:bg-zinc-850 dark:hover:bg-violet-950/30 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer group animate-shine"
-                  title="Crea texto flotante transparente sin bordes ni estilo de tarjeta"
-                >
-                  <div className="p-1 px-1.5 rounded-lg bg-gray-100 dark:bg-zinc-800 text-violet-600 dark:text-violet-400 group-hover:bg-violet-100 dark:group-hover:bg-violet-900">
-                    <Sparkles className="w-3.5 h-3.5" />
-                  </div>
-                  <span className="text-left leading-tight">Texto Libre (Sin Card)</span>
-                </button>
-              </div>
-
-          {/* Section: Physics Modules */}
-          <div className="space-y-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Módulos de Física</span>
-            <button
-              id="sidebar-add-physics-pendulum"
-              type="button"
-              onClick={() => addPreset('physics_pendulum')}
-              className="w-full flex items-center gap-2 group px-3 py-2 bg-white/70 hover:bg-amber-50 dark:bg-zinc-850 dark:hover:bg-amber-950/20 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-amber-600 group-hover:bg-amber-100 dark:group-hover:bg-amber-900/60 shrink-0">
-                <Compass className="w-3.5 h-3.5" />
-              </div>
-              <span className="truncate">Simular Péndulo</span>
-            </button>
-
-            <button
-              id="sidebar-add-physics-force"
-              type="button"
-              onClick={() => addPreset('physics_force')}
-              className="w-full flex items-center gap-2 group px-3 py-2 bg-white/70 hover:bg-sky-50 dark:bg-zinc-850 dark:hover:bg-sky-950/20 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-lg bg-sky-50 dark:bg-sky-950/30 text-sky-600 group-hover:bg-sky-100 dark:group-hover:bg-sky-900/60 shrink-0">
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </div>
-              <span className="truncate">Vectores de Fuerza</span>
-            </button>
-
-            <button
-              id="sidebar-add-physics-magnet"
-              type="button"
-              onClick={() => addPreset('physics_magnet')}
-              className="w-full flex items-center gap-2 group px-3 py-2 bg-white/70 hover:bg-rose-50 dark:bg-zinc-850 dark:hover:bg-rose-950/20 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-500 group-hover:bg-rose-100 dark:group-hover:bg-rose-900/60 shrink-0">
-                <Zap className="w-3.5 h-3.5" />
-              </div>
-              <span className="truncate">Imán Magnético</span>
-            </button>
-          </div>
-
-          {/* Section: Chemistry Modules */}
-          <div className="space-y-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Módulos de Química</span>
-            <button
-              id="sidebar-add-chemistry-beaker"
-              type="button"
-              onClick={() => addPreset('chemistry_beaker')}
-              className="w-full flex items-center gap-2 group px-3 py-2 bg-white/70 hover:bg-teal-50 dark:bg-zinc-850 dark:hover:bg-teal-950/20 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-lg bg-teal-50 dark:bg-teal-950/30 text-teal-600 group-hover:bg-teal-100 dark:group-hover:bg-teal-900/60 shrink-0">
-                <FlaskConical className="w-3.5 h-3.5" />
-              </div>
-              <span className="truncate">Vaso de Precipitado</span>
-            </button>
-
-            <button
-              id="sidebar-add-chemistry-tube"
-              type="button"
-              onClick={() => addPreset('chemistry_tube')}
-              className="w-full flex items-center gap-2 group px-3 py-2 bg-white/70 hover:bg-fuchsia-50 dark:bg-zinc-850 dark:hover:bg-fuchsia-950/20 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-lg bg-fuchsia-50 dark:bg-fuchsia-950/30 text-fuchsia-600 group-hover:bg-fuchsia-100 dark:group-hover:bg-fuchsia-900/60 shrink-0">
-                <Waves className="w-3.5 h-3.5" />
-              </div>
-              <span className="truncate">Tubo de Ensayo</span>
-            </button>
-
-            <button
-              id="sidebar-add-chemistry-bunsen"
-              type="button"
-              onClick={() => addPreset('chemistry_bunsen')}
-              className="w-full flex items-center gap-2 group px-3 py-2 bg-white/70 hover:bg-orange-50 dark:bg-zinc-850 dark:hover:bg-orange-950/20 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-lg bg-orange-50 dark:bg-orange-950/30 text-orange-600 group-hover:bg-orange-100 dark:group-hover:bg-orange-900/60 shrink-0">
-                <Flame className="w-3.5 h-3.5 animate-pulse" />
-              </div>
-              <span className="truncate">Mechero Bunsen</span>
-            </button>
-
-            <button
-              id="sidebar-add-chemistry-molecule"
-              type="button"
-              onClick={() => addPreset('chemistry_molecule')}
-              className="w-full flex items-center gap-2 group px-3 py-2 bg-white/70 hover:bg-indigo-50 dark:bg-zinc-850 dark:hover:bg-indigo-950/20 border border-gray-150 dark:border-zinc-800 rounded-2xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900/60 shrink-0">
-                <Lightbulb className="w-3.5 h-3.5" />
-              </div>
-              <span className="truncate">Molécula Química</span>
-            </button>
-          </div>
-
-          {/* Section: Geometric Shapes & Instrumental */}
-          <div className="space-y-1.5 shrink-0">
-            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Figuras e Instrumental</span>
-            <button
-              id="sidebar-add-shape-line"
-              type="button"
-              onClick={() => addPreset('shape_line')}
-              className="w-full flex items-center gap-2 group px-3 py-1.5 bg-white/70 hover:bg-emerald-50 dark:bg-zinc-850 dark:hover:bg-emerald-950/20 border border-gray-150 dark:border-zinc-800 rounded-xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-md bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 group-hover:bg-emerald-100 dark:group-hover:bg-emerald-900/60 shrink-0">
-                <PenTool className="w-3 h-3" />
-              </div>
-              <span className="truncate">Línea Geométrica</span>
-            </button>
-
-            <button
-              id="sidebar-add-shape-circle"
-              type="button"
-              onClick={() => addPreset('shape_circle')}
-              className="w-full flex items-center gap-2 group px-3 py-1.5 bg-white/70 hover:bg-rose-50 dark:bg-zinc-850 dark:hover:bg-rose-950/20 border border-gray-150 dark:border-zinc-800 rounded-xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-md bg-rose-50 dark:bg-rose-950/30 text-rose-600 group-hover:bg-rose-100 dark:group-hover:bg-rose-900/60 shrink-0">
-                <Circle className="w-3 h-3 text-rose-500" />
-              </div>
-              <span className="truncate">Círculo Precisión</span>
-            </button>
-
-            <button
-              id="sidebar-add-rule-angle"
-              type="button"
-              onClick={() => addPreset('rule_angle')}
-              className="w-full flex items-center gap-2 group px-3 py-1.5 bg-white/70 hover:bg-cyan-50 dark:bg-zinc-850 dark:hover:bg-cyan-950/20 border border-gray-150 dark:border-zinc-800 rounded-xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-md bg-cyan-100/50 dark:bg-cyan-950/30 text-cyan-600 group-hover:bg-cyan-100 dark:group-hover:bg-cyan-900/60 shrink-0">
-                <Compass className="w-3 h-3" />
-              </div>
-              <span className="truncate">Regla de Ángulos</span>
-            </button>
-
-            <button
-              id="sidebar-add-rule-measure"
-              type="button"
-              onClick={() => addPreset('rule_measure')}
-              className="w-full flex items-center gap-2 group px-3 py-1.5 bg-white/70 hover:bg-amber-50 dark:bg-zinc-850 dark:hover:bg-amber-950/20 border border-gray-150 dark:border-zinc-800 rounded-xl text-xs font-bold transition-all hover:translate-x-1 cursor-pointer"
-            >
-              <div className="p-1 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-600 group-hover:bg-amber-105 dark:group-hover:bg-amber-900/60 shrink-0">
-                <Ruler className="w-3 h-3" />
-              </div>
-              <span className="truncate">Regla Escala</span>
-            </button>
-          </div>
-
-          {/* Quick Stats of Board */}
-          <div className="mt-auto pt-4 border-t border-gray-150 dark:border-zinc-800/80 select-none">
-            <div className="flex items-center justify-between text-[10px] text-zinc-500 font-bold">
-              <span>Elementos En Pizarra</span>
-              <span className="bg-indigo-50 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 py-0.5 px-2 rounded-full">{items.length}</span>
-            </div>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-
         {/* Right Content Area: Board Selector & Canvas Frame */}
         <div 
           ref={boardContainerRef}
@@ -2140,13 +1946,220 @@ export const AIBoardSandbox: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsWidgetsPanelOpen(true)}
-              className="absolute left-4 top-4 z-40 px-3 py-2 bg-zinc-900/95 hover:bg-zinc-850 dark:bg-zinc-950/95 border border-zinc-800 text-white rounded-2xl shadow-2xl transition-all cursor-pointer flex items-center gap-2 hover:scale-105 active:scale-95 group"
+              className="absolute left-3 top-3 z-40 px-3 py-1.5 bg-zinc-900/95 hover:bg-zinc-850 dark:bg-zinc-950/95 border border-zinc-800 text-white rounded-xl shadow-2xl transition-all cursor-pointer flex items-center gap-2 hover:scale-105 active:scale-95 group"
               title="Mostrar Panel de Herramientas"
             >
               <Sliders className="w-3.5 h-3.5 text-emerald-400 group-hover:rotate-12 transition-transform duration-300" />
               <span className="text-[10px] font-black tracking-wider uppercase">Herramientas</span>
             </button>
           )}
+
+          {/* Left Floating Toolbar / Element Drawer COMPLETELY INSIDE chalkboard workspace */}
+          <AnimatePresence>
+            {isWidgetsPanelOpen && (
+              <motion.div
+                initial={{ opacity: 0, x: -50, scale: 0.95 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: -50, scale: 0.95 }}
+                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                className="absolute left-3 top-3 bottom-3 z-40 w-44 max-h-[calc(100%-24px)] bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-zinc-800 rounded-2xl p-2 flex flex-col gap-1.5 overflow-y-auto text-left select-none shadow-2xl"
+              >
+                {/* Header with Close Button */}
+                <div className="flex items-center justify-between pb-1 border-b border-gray-150 dark:border-zinc-800 shrink-0">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-gray-700 dark:text-zinc-300">Herramientas</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsWidgetsPanelOpen(false)}
+                    className="p-1 hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200 rounded-lg transition-colors cursor-pointer"
+                    title="Cerrar panel de herramientas"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Section: Annotations */}
+                <div className="space-y-1 shrink-0">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Documental</span>
+                  <button
+                    id="sidebar-add-note"
+                    type="button"
+                    onClick={() => addPreset('text')}
+                    className="w-full flex items-center gap-2 px-2 py-1 bg-white/70 hover:bg-indigo-50 dark:bg-zinc-850 dark:hover:bg-indigo-950/30 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer group"
+                  >
+                    <div className="p-1 rounded-md bg-gray-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900">
+                      <FileText className="w-3 h-3" />
+                    </div>
+                    <span>Anotación Card</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-free-text"
+                    type="button"
+                    onClick={() => addPreset('free_text')}
+                    className="w-full flex items-center gap-2 px-2 py-1 bg-white/70 hover:bg-violet-50 dark:bg-zinc-850 dark:hover:bg-violet-950/30 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer group"
+                    title="Crea texto flotante transparente sin bordes ni estilo de tarjeta"
+                  >
+                    <div className="p-1 rounded-md bg-gray-100 dark:bg-zinc-800 text-violet-600 dark:text-violet-400 group-hover:bg-violet-100 dark:group-hover:bg-violet-900">
+                      <Sparkles className="w-3 h-3" />
+                    </div>
+                    <span className="text-left leading-tight">Texto Libre</span>
+                  </button>
+                </div>
+
+                {/* Section: Physics Modules */}
+                <div className="space-y-1 shrink-0">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Módulos de Física</span>
+                  <button
+                    id="sidebar-add-physics-pendulum"
+                    type="button"
+                    onClick={() => addPreset('physics_pendulum')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-amber-50 dark:bg-zinc-850 dark:hover:bg-amber-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-600 group-hover:bg-amber-100 dark:group-hover:bg-amber-900/60 shrink-0">
+                      <Compass className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Simular Péndulo</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-physics-force"
+                    type="button"
+                    onClick={() => addPreset('physics_force')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-sky-50 dark:bg-zinc-850 dark:hover:bg-sky-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-sky-50 dark:bg-sky-950/30 text-sky-600 group-hover:bg-sky-100 dark:group-hover:bg-sky-900/60 shrink-0">
+                      <ArrowUpRight className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Vectores Fuerza</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-physics-magnet"
+                    type="button"
+                    onClick={() => addPreset('physics_magnet')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-rose-50 dark:bg-zinc-850 dark:hover:bg-rose-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-rose-50 dark:bg-rose-950/30 text-rose-500 group-hover:bg-rose-100 dark:group-hover:bg-rose-900/60 shrink-0">
+                      <Zap className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Imán Magnético</span>
+                  </button>
+                </div>
+
+                {/* Section: Chemistry Modules */}
+                <div className="space-y-1 shrink-0">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Módulos de Química</span>
+                  <button
+                    id="sidebar-add-chemistry-beaker"
+                    type="button"
+                    onClick={() => addPreset('chemistry_beaker')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-teal-50 dark:bg-zinc-850 dark:hover:bg-teal-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-teal-50 dark:bg-teal-950/30 text-teal-600 group-hover:bg-teal-100 dark:group-hover:bg-teal-900/60 shrink-0">
+                      <FlaskConical className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Vaso Precipitado</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-chemistry-tube"
+                    type="button"
+                    onClick={() => addPreset('chemistry_tube')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-fuchsia-50 dark:bg-zinc-850 dark:hover:bg-fuchsia-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-fuchsia-50 dark:bg-fuchsia-950/30 text-fuchsia-600 group-hover:bg-fuchsia-100 dark:group-hover:bg-fuchsia-900/60 shrink-0">
+                      <Waves className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Tubo de Ensayo</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-chemistry-bunsen"
+                    type="button"
+                    onClick={() => addPreset('chemistry_bunsen')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-orange-50 dark:bg-zinc-850 dark:hover:bg-orange-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-orange-50 dark:bg-orange-950/30 text-orange-600 group-hover:bg-orange-100 dark:group-hover:bg-orange-900/60 shrink-0">
+                      <Flame className="w-3 h-3 animate-pulse" />
+                    </div>
+                    <span className="truncate">Mechero Bunsen</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-chemistry-molecule"
+                    type="button"
+                    onClick={() => addPreset('chemistry_molecule')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-indigo-50 dark:bg-zinc-850 dark:hover:bg-indigo-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900/60 shrink-0">
+                      <Lightbulb className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Molécula Química</span>
+                  </button>
+                </div>
+
+                {/* Section: Geometric Shapes & Instrumental */}
+                <div className="space-y-1 shrink-0">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Figuras & Geometría</span>
+                  <button
+                    id="sidebar-add-shape-line"
+                    type="button"
+                    onClick={() => addPreset('shape_line')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-emerald-50 dark:bg-zinc-850 dark:hover:bg-emerald-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 group-hover:bg-emerald-100 dark:group-hover:bg-emerald-900/60 shrink-0">
+                      <PenTool className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Línea Guía</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-shape-circle"
+                    type="button"
+                    onClick={() => addPreset('shape_circle')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-rose-50 dark:bg-zinc-850 dark:hover:bg-rose-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-rose-50 dark:bg-rose-950/30 text-rose-600 group-hover:bg-rose-100 dark:group-hover:bg-rose-900/60 shrink-0">
+                      <Circle className="w-3 h-3 text-rose-500" />
+                    </div>
+                    <span className="truncate">Círculo Precisión</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-rule-angle"
+                    type="button"
+                    onClick={() => addPreset('rule_angle')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-cyan-50 dark:bg-zinc-850 dark:hover:bg-cyan-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-cyan-100/50 dark:bg-cyan-950/30 text-cyan-600 group-hover:bg-cyan-100 dark:group-hover:bg-cyan-900/60 shrink-0">
+                      <Compass className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Regla Ángulos</span>
+                  </button>
+
+                  <button
+                    id="sidebar-add-rule-measure"
+                    type="button"
+                    onClick={() => addPreset('rule_measure')}
+                    className="w-full flex items-center gap-2 group px-2 py-1 bg-white/70 hover:bg-amber-50 dark:bg-zinc-850 dark:hover:bg-amber-950/20 border border-gray-150 dark:border-zinc-800 rounded-lg text-[10px] font-bold transition-all hover:translate-x-0.5 cursor-pointer"
+                  >
+                    <div className="p-1 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-600 group-hover:bg-amber-105 dark:group-hover:bg-amber-900/60 shrink-0">
+                      <Ruler className="w-3 h-3" />
+                    </div>
+                    <span className="truncate">Regla Escala</span>
+                  </button>
+                </div>
+
+                {/* Quick Stats of Board */}
+                <div className="mt-auto pt-2 border-t border-gray-150 dark:border-zinc-800/80 select-none shrink-0">
+                  <div className="flex items-center justify-between text-[9px] text-zinc-500 font-bold">
+                    <span>Elementos</span>
+                    <span className="bg-indigo-50 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 py-0.5 px-1.5 rounded-full">{items.length}</span>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* ========================================================= */}
           {/* TAB OVERLAYS & CONTROLS FOR DRAWING HANDS (PIZARRA TIZA) */}

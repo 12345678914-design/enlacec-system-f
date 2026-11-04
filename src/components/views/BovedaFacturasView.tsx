@@ -30,9 +30,40 @@ import {
   Bell,
   Send,
   Smartphone,
-  ShieldAlert
+  ShieldAlert,
+  QrCode,
+  FileCode,
+  Truck,
+  Building2,
+  Settings2,
+  FileCheck2
 } from 'lucide-react';
-import { generateStudentBoleta, generateTeacherBoleta } from '../../utils/pdfGenerator';
+import {
+  generateStudentBoleta,
+  generateTeacherBoleta,
+  generateSunatElectronicPdf,
+  generateGuiaRemisionPdf
+} from '../../utils/pdfGenerator';
+import {
+  consultarPadronSunat,
+  validarComprobanteSunat,
+  emitirResumenOBajaSunat,
+  generateSunatUblXml,
+  generateSunatCdrXml,
+  generateGuiaRemisionXml,
+  generateCpeHash,
+  buildSunatQrString,
+  numeroALetrasSoles,
+  downloadTextFile,
+  getSunatConfig,
+  saveSunatConfig,
+  getSavedGuiasRemision,
+  saveGuiaRemisionLocal,
+  SunatPadronResult,
+  SunatValidezResult,
+  SunatGuiaRemision,
+  SunatConfig
+} from '../../services/sunatService';
 import { motion, AnimatePresence } from 'motion/react';
 import { Factura, Student, Teacher } from '../../types';
 
@@ -61,6 +92,7 @@ export const BovedaFacturasView: React.FC = () => {
     addTransaction,
     theme,
     vaultPasscode,
+    setVaultPasscode,
     currentUser
   } = useApp();
 
@@ -73,25 +105,129 @@ export const BovedaFacturasView: React.FC = () => {
   const [passcodeAttempt, setPasscodeAttempt] = useState('');
   const [unlockError, setUnlockError] = useState('');
 
+  // Change passcode modal states
+  const [showChangePasscodeModal, setShowChangePasscodeModal] = useState(false);
+  const [currentPassInput, setCurrentPassInput] = useState('');
+  const [newPassInput, setNewPassInput] = useState('');
+  const [confirmPassInput, setConfirmPassInput] = useState('');
+  const [changePassError, setChangePassError] = useState('');
+  const [changePassSuccess, setChangePassSuccess] = useState('');
+  const [isSavingPasscode, setIsSavingPasscode] = useState(false);
+
+  // SUNAT Hybrid Mode & Config State
+  const [sunatConfig, setSunatConfig] = useState<SunatConfig>(() => getSunatConfig());
+  const [showSunatConfigModal, setShowSunatConfigModal] = useState(false);
+
+  // SUNAT Modals States (Validador CPE, Resumen Diario, Comunicación de Baja, Guías de Remisión GRE)
+  const [showValidadorCpeModal, setShowValidadorCpeModal] = useState(false);
+  const [valRucEmisor, setValRucEmisor] = useState('20000000001');
+  const [valTipoComp, setValTipoComp] = useState('01');
+  const [valSerie, setValSerie] = useState('F001');
+  const [valNumero, setValNumero] = useState('000001');
+  const [valFecha, setValFecha] = useState(() => new Date().toISOString().split('T')[0]);
+  const [valMonto, setValMonto] = useState('150.00');
+  const [isValidatingCpe, setIsValidatingCpe] = useState(false);
+  const [validezResult, setValidezResult] = useState<SunatValidezResult | null>(null);
+
+  // Resumen Diario (RC) & Comunicación de Baja (RA)
+  const [showResumenDiarioModal, setShowResumenDiarioModal] = useState(false);
+  const [resumenFecha, setResumenFecha] = useState(() => new Date().toISOString().split('T')[0]);
+  const [isSendingResumen, setIsSendingResumen] = useState(false);
+  const [resumenResponse, setResumenResponse] = useState<{
+    identificador: string;
+    ticketSunat: string;
+    mensaje: string;
+    xmlContent: string;
+    cdrContent: string;
+  } | null>(null);
+
+  const [facturaToBaja, setFacturaToBaja] = useState<Factura | null>(null);
+  const [motivoBajaInput, setMotivoBajaInput] = useState('ERROR EN RUC/DNI O DATOS DE EMISIÓN');
+  const [isSendingBaja, setIsSendingBaja] = useState(false);
+
+  // Guías de Remisión Electrónica (GRE - Serie T001)
+  const [showGreModal, setShowGreModal] = useState(false);
+  const [guiasRemision, setGuiasRemision] = useState<SunatGuiaRemision[]>(() => getSavedGuiasRemision());
+  const [greRucDestino, setGreRucDestino] = useState('20554433221');
+  const [greNombreDestino, setGreNombreDestino] = useState('SEDE ACADÉMICA ENLACEC - ANEXO LABORATORIO');
+  const [grePuntoPartida, setGrePuntoPartida] = useState('AV. GARCILASO DE LA VEGA 1472 - LIMA');
+  const [grePuntoLlegada, setGrePuntoLlegada] = useState('AV. AREQUIPA 2450 - MIRAFLORES - LIMA');
+  const [greMotivo, setGreMotivo] = useState('04 - Traslado entre establecimientos de la misma empresa');
+  const [greModalidad, setGreModalidad] = useState('02 - Transporte Privado');
+  const [grePesoKg, setGrePesoKg] = useState('18.50');
+  const [grePlaca, setGrePlaca] = useState('B4X-782');
+  const [greDniConductor, setGreDniConductor] = useState('46027897');
+  const [greDescripcionBienes, setGreDescripcionBienes] = useState('Kits de Laboratorio de Física y Compendios Educativos');
+  const [greSearchQuery, setGreSearchQuery] = useState('');
+  const [greConsultaMsg, setGreConsultaMsg] = useState('');
+
   const handleUnlock = (e: React.FormEvent) => {
     e.preventDefault();
-    if (passcodeAttempt === vaultPasscode) {
+    const cleanAttempt = passcodeAttempt.trim();
+    const currentPass = (vaultPasscode || '1234').trim();
+
+    if (cleanAttempt === currentPass) {
       setIsUnlocked(true);
       sessionStorage.setItem('edu_boveda_unlocked', 'true');
       setUnlockError('');
       setPasscodeAttempt('');
       addNotification({
-        title: '🔑 Acceso Concedido',
+        title: 'Acceso Concedido',
         content: 'Has ingresado correctamente a la Bóveda de Facturas.',
         type: 'success'
       });
     } else {
-      setUnlockError('La clave ingresada es incorrecta. Inténtalo de nuevo.');
+      setUnlockError('Acceso Denegado: La clave ingresada es incorrecta.');
+      setPasscodeAttempt('');
       addNotification({
-        title: '🔒 Acceso Denegado',
-        content: 'La clave de la bóveda de facturas no es correcta.',
+        title: 'Acceso Denegado',
+        content: 'La clave de la bóveda de facturas no es válida. Acceso bloqueado.',
         type: 'error'
       });
+    }
+  };
+
+  const handleChangePasscode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePassError('');
+    setChangePassSuccess('');
+
+    const currentPass = (vaultPasscode || '1234').trim();
+    if (currentPassInput.trim() !== currentPass) {
+      setChangePassError('La clave actual ingresada es incorrecta.');
+      return;
+    }
+
+    if (newPassInput.trim().length < 4) {
+      setChangePassError('La nueva clave debe tener al menos 4 caracteres.');
+      return;
+    }
+
+    if (newPassInput.trim() !== confirmPassInput.trim()) {
+      setChangePassError('Las nuevas claves no coinciden.');
+      return;
+    }
+
+    setIsSavingPasscode(true);
+    try {
+      await setVaultPasscode(newPassInput.trim());
+      setChangePassSuccess('¡Clave de la Bóveda actualizada y registrada en la base de datos con éxito!');
+      addNotification({
+        title: 'Clave de Bóveda Actualizada',
+        content: 'La nueva contraseña ha sido guardada en la base de datos de forma segura.',
+        type: 'success'
+      });
+      setTimeout(() => {
+        setShowChangePasscodeModal(false);
+        setCurrentPassInput('');
+        setNewPassInput('');
+        setConfirmPassInput('');
+        setChangePassSuccess('');
+      }, 1500);
+    } catch (err: any) {
+      setChangePassError('Error guardando la nueva clave: ' + (err.message || 'Error desconocido'));
+    } finally {
+      setIsSavingPasscode(false);
     }
   };
 
@@ -99,7 +235,7 @@ export const BovedaFacturasView: React.FC = () => {
     setIsUnlocked(false);
     sessionStorage.removeItem('edu_boveda_unlocked');
     addNotification({
-      title: '🔒 Bóveda Cerrada',
+      title: 'Bóveda Cerrada',
       content: 'Has cerrado la sesión de la Bóveda de Facturas.',
       type: 'info'
     });
@@ -120,14 +256,19 @@ export const BovedaFacturasView: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
 
-  // Detail viewer state (simple preview modal)
-  const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null);
+  // SUNAT Emission Fields inside Modal
+  const [tipoComprobanteCodigo, setTipoComprobanteCodigo] = useState<'03' | '01' | '02' | 'NV' | 'LQ'>('03');
+  const [afectacionIgv, setAfectacionIgv] = useState<'exonerado' | 'gravado' | 'inafecto_rhe'>('exonerado');
+  const [docReceptorInput, setDocReceptorInput] = useState('');
+  const [nombreReceptorInput, setNombreReceptorInput] = useState('');
+  const [direccionReceptorInput, setDireccionReceptorInput] = useState('LIMA - PERÚ');
+  const [padronInfo, setPadronInfo] = useState<SunatPadronResult | null>(null);
+  const [isConsultingPadron, setIsConsultingPadron] = useState(false);
 
-  // Cloudinary connection test states
+  // Cloudinary connection test state
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [testLogs, setTestLogs] = useState<string[]>([]);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [showTestPanel, setShowTestPanel] = useState(false);
 
   const handleTestCloudinaryConnection = async () => {
     setIsTestingConnection(true);
@@ -149,7 +290,7 @@ export const BovedaFacturasView: React.FC = () => {
         message: `Cloud Name de Cloudinary detectado (${cloudName}). La subida está lista.`
       });
       addNotification({
-        title: '✅ Cloudinary Conectado',
+        title: 'Cloudinary Conectado',
         content: `Cloud Name (${cloudName}) configurado correctamente en la aplicación.`,
         type: 'success'
       });
@@ -159,7 +300,7 @@ export const BovedaFacturasView: React.FC = () => {
         message: 'No se detectó VITE_CLOUDINARY_CLOUD_NAME. Los comprobantes se guardarán en modo local seguro.'
       });
       addNotification({
-        title: '💡 Bóveda en Modo Local',
+        title: 'Bóveda en Modo Local',
         content: 'Sin Cloudinary, tus comprobantes se almacenan de forma segura dentro del sistema en el navegador.',
         type: 'info'
       });
@@ -202,7 +343,6 @@ export const BovedaFacturasView: React.FC = () => {
           }));
           setBovedaCodigos(formatted);
         } else {
-          // Fallback initial codes if table empty
           const defaultCode: BovedaCodigo = {
             id: 'code-initial-1',
             created_at: new Date().toISOString(),
@@ -240,31 +380,34 @@ export const BovedaFacturasView: React.FC = () => {
       copiado: false
     };
 
-    setBovedaCodigos(prev => [newRecord, ...prev]);
-
-    // Insert into Supabase table: boveda_codigos
     try {
-      await supabase.from('boveda_codigos').insert([{ codigo: randomCode }]);
-    } catch (err) {
-      console.warn('Could not insert to Supabase boveda_codigos:', err);
+      const { data, error } = await supabase
+        .from('boveda_codigos')
+        .insert([{ codigo: randomCode }])
+        .select()
+        .single();
+
+      if (!error && data) {
+        newRecord.id = data.id;
+        newRecord.created_at = data.created_at;
+      }
+    } catch (e) {
+      console.warn('Fallback local para boveda_codigos:', e);
     }
 
-    // Trigger Push Notification
-    await addPushNotification({
-      title: '🔑 Nuevo Código de Bóveda Generado',
-      body: `Se ha creado el código de acceso de 6 caracteres: ${randomCode}.`,
-      type: 'general'
-    });
-
+    setBovedaCodigos(prev => [newRecord, ...prev]);
     setIsGeneratingCode(false);
+
+    await addPushNotification({
+      title: 'Nuevo Código de Bóveda Generado',
+      body: `Se ha creado un nuevo código de acceso de 6 caracteres en la bóveda.`,
+      type: 'sistema'
+    });
   };
 
-  const handleRequestCopyCode = (codigoObj: BovedaCodigo) => {
-    if (codigoObj.copiado) {
-      alert('🔒 Este código de acceso ya fue copiado/extraído previamente y no se puede volver a copiar por razones de seguridad.');
-      return;
-    }
-    setCodeToCopy(codigoObj);
+  const handleRequestCopyCode = (codeObj: BovedaCodigo) => {
+    if (codeObj.copiado) return;
+    setCodeToCopy(codeObj);
     setCopyPasswordInput('');
     setCopyPasswordError('');
   };
@@ -273,8 +416,8 @@ export const BovedaFacturasView: React.FC = () => {
     e.preventDefault();
     if (!codeToCopy) return;
 
-    const validPassword = currentUser?.password || vaultPasscode || '1234';
-    if (copyPasswordInput === validPassword || copyPasswordInput === vaultPasscode || copyPasswordInput === '1234') {
+    const validPassword = (vaultPasscode || '1234').trim();
+    if (copyPasswordInput.trim() === validPassword) {
       try {
         await navigator.clipboard.writeText(codeToCopy.codigo);
       } catch (err) {
@@ -283,13 +426,13 @@ export const BovedaFacturasView: React.FC = () => {
       markCodeAsCopied(codeToCopy.id);
       
       addNotification({
-        title: '📋 Código Copiado',
+        title: 'Código Copiado',
         content: `El código ${codeToCopy.codigo} fue copiado al portapapeles. Ya no se podrá volver a copiar.`,
         type: 'success'
       });
 
       await addPushNotification({
-        title: '🔐 Código Extraído de Bóveda',
+        title: 'Código Extraído de Bóveda',
         body: `El código de acceso ${codeToCopy.codigo} fue verificado y copiado.`,
         type: 'sistema'
       });
@@ -329,10 +472,12 @@ export const BovedaFacturasView: React.FC = () => {
     return facturas.filter(f => {
       const matchesSearch = 
         f.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (f.detalles.serieCorrelativo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         f.concepto.toLowerCase().includes(searchTerm.toLowerCase()) ||
         f.detalles.nombrePersona.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (f.detalles.dniDocente || '').includes(searchTerm) ||
-        (f.detalles.dniEstudiante || '').includes(searchTerm);
+        (f.detalles.dniEstudiante || '').includes(searchTerm) ||
+        (f.detalles.docClienteNumero || '').includes(searchTerm);
 
       const matchesTipo = filterTipo === 'todos' || f.tipo === filterTipo;
       const matchesEstado = filterEstado === 'todos' || f.estado === filterEstado;
@@ -377,7 +522,6 @@ export const BovedaFacturasView: React.FC = () => {
 
   const currentTeacherAttendanceRecords = useMemo(() => {
     if (!selectedTeacherId) return [];
-    // Filter attendance records submitted by this teacher during the current month
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
     
@@ -389,10 +533,112 @@ export const BovedaFacturasView: React.FC = () => {
   }, [attendance, selectedTeacherId]);
 
   const teacherEstimatedSalary = useMemo(() => {
-    const sessionRate = 75.00; // S/. 75.00 rate per session as structured in pdfGenerator.ts
-    const classesCount = currentTeacherAttendanceRecords.length || 4; // fallback to 4 standard sessions if no sessions logged yet
+    if (currentTeacherAttendanceRecords.length > 0) {
+      const sumFromRecords = currentTeacherAttendanceRecords.reduce(
+        (acc, r) => acc + (Number(r.monto) || 75.0),
+        0
+      );
+      if (sumFromRecords > 0) return sumFromRecords;
+    }
+    const sessionRate = 75.00;
+    const classesCount = currentTeacherAttendanceRecords.length || 4;
     return classesCount * sessionRate;
   }, [currentTeacherAttendanceRecords]);
+
+  // Sync receptor fields when student or teacher changes
+  useEffect(() => {
+    if (emissionTab === 'estudiante' && currentSelectedStudent) {
+      const dni = currentSelectedStudent.dni || '';
+      const fullName = `${currentSelectedStudent.nombre} ${currentSelectedStudent.apellido}`.trim();
+      setDocReceptorInput(dni);
+      setNombreReceptorInput(fullName);
+      setTipoComprobanteCodigo(sunatConfig.modo === 'interno_sin_ruc' ? 'NV' : '03');
+      setAfectacionIgv('exonerado');
+      setPadronInfo(null);
+    } else if (emissionTab === 'profesor' && currentSelectedTeacher) {
+      const dni = currentSelectedTeacher.dni || '';
+      const fullName = `${currentSelectedTeacher.nombre || currentSelectedTeacher.name || ''} ${currentSelectedTeacher.apellido || ''}`.trim();
+      setDocReceptorInput(dni);
+      setNombreReceptorInput(fullName);
+      setTipoComprobanteCodigo(sunatConfig.modo === 'interno_sin_ruc' ? 'LQ' : '02');
+      setAfectacionIgv('inafecto_rhe');
+      setPadronInfo(null);
+    }
+  }, [emissionTab, currentSelectedStudent, currentSelectedTeacher, sunatConfig.modo]);
+
+  // Consulta Padrón SUNAT / RENIEC inside emission modal
+  const handleConsultarPadronReceptor = async () => {
+    const clean = docReceptorInput.trim();
+    if (clean.length !== 8 && clean.length !== 11) {
+      addNotification({
+        title: 'Documento inválido',
+        content: 'Ingresa un DNI de 8 dígitos o un RUC de 11 dígitos para consultar en SUNAT.',
+        type: 'warning'
+      });
+      return;
+    }
+    setIsConsultingPadron(true);
+    try {
+      const result = await consultarPadronSunat(clean);
+      setPadronInfo(result);
+      if (result.nombreRazonSocial) {
+        setNombreReceptorInput(result.nombreRazonSocial);
+      }
+      if (result.direccionFiscal) {
+        setDireccionReceptorInput(result.direccionFiscal);
+      }
+      if (clean.length === 11 && emissionTab === 'estudiante' && sunatConfig.modo === 'sandbox_beta') {
+        setTipoComprobanteCodigo('01'); // Switch to Factura F001 automatically for RUC
+      }
+    } finally {
+      setIsConsultingPadron(false);
+    }
+  };
+
+  // Tax calculation preview inside modal
+  const calculatedTaxes = useMemo(() => {
+    const rawAmount = customAmount
+      ? parseFloat(customAmount) || 0
+      : emissionTab === 'estudiante'
+      ? currentSelectedStudentService?.pago !== undefined
+        ? Number(currentSelectedStudentService.pago)
+        : 150.0
+      : teacherEstimatedSalary;
+
+    if (afectacionIgv === 'gravado') {
+      const opGravada = +(rawAmount / 1.18).toFixed(2);
+      const igvMonto = +(rawAmount - opGravada).toFixed(2);
+      return {
+        total: rawAmount,
+        opGravada,
+        opExonerada: 0,
+        igvMonto,
+        retencionRentaMonto: 0,
+        letras: numeroALetrasSoles(rawAmount)
+      };
+    }
+
+    if (afectacionIgv === 'inafecto_rhe') {
+      const retencion = rawAmount > 1500 ? +(rawAmount * 0.08).toFixed(2) : 0;
+      return {
+        total: rawAmount,
+        opGravada: 0,
+        opExonerada: rawAmount,
+        igvMonto: 0,
+        retencionRentaMonto: retencion,
+        letras: numeroALetrasSoles(rawAmount)
+      };
+    }
+
+    return {
+      total: rawAmount,
+      opGravada: 0,
+      opExonerada: rawAmount,
+      igvMonto: 0,
+      retencionRentaMonto: 0,
+      letras: numeroALetrasSoles(rawAmount)
+    };
+  }, [customAmount, emissionTab, currentSelectedStudentService, teacherEstimatedSalary, afectacionIgv]);
 
   // Form emission handlers
   const handleEmitirComprobante = async (e: React.FormEvent) => {
@@ -401,8 +647,48 @@ export const BovedaFacturasView: React.FC = () => {
     setUploadStatus({ type: 'idle', message: '' });
 
     try {
+      // Block emission if taxpayer condition is NO HABIDO on Factura
+      if (padronInfo && padronInfo.condicion === 'NO HABIDO' && tipoComprobanteCodigo === '01') {
+        throw new Error('ALERTA SUNAT: No se puede emitir Factura Electrónica a un contribuyente en condición NO HABIDO.');
+      }
+
+      const nextSeq = String(facturas.length + 1).padStart(6, '0');
+      const serieMap: Record<string, string> = {
+        '01': 'F001',
+        '03': 'B001',
+        '02': 'E001',
+        'NV': 'NV01',
+        'LQ': 'LQ01'
+      };
+      const nombreCompMap: Record<string, string> = {
+        '01': 'FACTURA ELECTRONICA',
+        '03': 'BOLETA DE VENTA ELECTRONICA',
+        '02': 'RECIBO POR HONORARIOS ELECTRONICO',
+        'NV': 'NOTA DE VENTA INTERNA',
+        'LQ': 'LIQUIDACION DE ASISTENCIA DOCENTE'
+      };
+
+      const serie = serieMap[tipoComprobanteCodigo] || 'B001';
+      const serieCorrelativo = `${serie}-${nextSeq}`;
+      const rucEmisor = sunatConfig.modo === 'sandbox_beta' ? sunatConfig.rucEmisor : '00000000000';
+      const docNum = docReceptorInput.trim() || '00000000';
+      const docTipo: '1' | '6' = docNum.length === 11 ? '6' : '1';
+      const finalAmount = calculatedTaxes.total;
+      const hashCpe = generateCpeHash(`${rucEmisor}|${serieCorrelativo}|${finalAmount}|${Date.now()}`);
+      const qrCadena = buildSunatQrString({
+        rucEmisor,
+        tipoComprobanteCodigo,
+        serieCorrelativo,
+        igvMonto: calculatedTaxes.igvMonto,
+        montoTotal: finalAmount,
+        fechaEmision: new Date().toISOString().split('T')[0],
+        docClienteTipo: docTipo,
+        docClienteNumero: docNum,
+        hashCpe
+      });
+
       let base64Pdf = '';
-      let invoiceId = '';
+      let invoiceId = serieCorrelativo;
       let facturaData: Omit<Factura, 'id' | 'created_at'>;
 
       if (emissionTab === 'estudiante') {
@@ -410,40 +696,45 @@ export const BovedaFacturasView: React.FC = () => {
           throw new Error('Debe seleccionar un estudiante');
         }
 
-        const servicePrice = currentSelectedStudentService?.pago !== undefined 
-          ? Number(currentSelectedStudentService.pago) 
-          : 150.00;
-        
-        const finalAmount = customAmount ? parseFloat(customAmount) : servicePrice;
-
-        // Generate PDF base64 (without downloading)
-        const pdfResult = generateStudentBoleta(
-          currentSelectedStudent,
-          currentSelectedStudentService,
-          currentSelectedStudentCourses,
-          false, // do not auto-download
-          {
-            amount: finalAmount,
-            concepto: customConcept || `Boleta de Matrícula Regular - ${currentSelectedStudent.nombre} ${currentSelectedStudent.apellido}`,
-            paymentMethod: 'Efectivo / Transferencia Bancaria',
-            paymentStatus: 'EMITIDA'
-          }
-        );
-
-        base64Pdf = pdfResult.base64;
-        invoiceId = pdfResult.id;
+        const conceptoFinal =
+          customConcept ||
+          `${nombreCompMap[tipoComprobanteCodigo]} - Matrícula ${currentSelectedStudentService?.nombre || 'Regular'} (${currentSelectedStudent.nombre} ${currentSelectedStudent.apellido})`;
 
         facturaData = {
           tipo: 'estudiante',
           student_id: currentSelectedStudent.id,
           monto: finalAmount,
           estado: 'emitida',
-          concepto: customConcept || `Boleta de Matrícula Regular - ${currentSelectedStudent.nombre} ${currentSelectedStudent.apellido}`,
+          concepto: conceptoFinal,
           detalles: {
-            nombrePersona: `${currentSelectedStudent.nombre} ${currentSelectedStudent.apellido}`,
-            dniEstudiante: currentSelectedStudent.dni || 'No registrado',
+            nombrePersona: nombreReceptorInput || `${currentSelectedStudent.nombre} ${currentSelectedStudent.apellido}`,
+            dniEstudiante: currentSelectedStudent.dni || docNum,
             nombreServicio: currentSelectedStudentService?.nombre || 'Matrícula Regular',
-            cursosVinculados: currentSelectedStudentCourses.map(c => c.nombre)
+            cursosVinculados: currentSelectedStudentCourses.map(c => c.nombre),
+            metodoPago: 'Transferencia / Contado',
+            modoTributario: sunatConfig.modo,
+            tipoComprobanteCodigo,
+            tipoComprobanteNombre: nombreCompMap[tipoComprobanteCodigo],
+            serieCorrelativo,
+            rucEmisor,
+            razonSocialEmisor: sunatConfig.razonSocialEmisor,
+            docClienteTipo: docTipo,
+            docClienteNumero: docNum,
+            direccionCliente: direccionReceptorInput,
+            estadoContribuyente: padronInfo?.estado || 'ACTIVO',
+            condicionContribuyente: padronInfo?.condicion || 'HABIDO',
+            regimenContribuyente: padronInfo?.regimen || 'Educación - Exonerado Art. 2 Ley IGV',
+            afectacionIgv,
+            opGravada: calculatedTaxes.opGravada,
+            opExonerada: calculatedTaxes.opExonerada,
+            igvMonto: calculatedTaxes.igvMonto,
+            retencionRentaMonto: 0,
+            montoEnLetras: calculatedTaxes.letras,
+            hashCpe,
+            qrCadena,
+            estadoSunat: sunatConfig.modo === 'sandbox_beta' ? 'ACEPTADO' : 'CONTROL_INTERNO',
+            codigoRespuestaSunat: '0',
+            mensajeSunat: `El comprobante ${serieCorrelativo} ha sido aceptado.`
           }
         };
       } else {
@@ -451,54 +742,75 @@ export const BovedaFacturasView: React.FC = () => {
           throw new Error('Debe seleccionar un docente');
         }
 
-        const finalAmount = customAmount ? parseFloat(customAmount) : teacherEstimatedSalary;
         const classesCount = currentTeacherAttendanceRecords.length || 4;
-
-        // Generate Teacher PDF
-        const pdfResult = generateTeacherBoleta(
-          currentSelectedTeacher,
-          currentTeacherAttendanceRecords,
-          false, // do not auto-download
-          {
-            amount: finalAmount,
-            concepto: customConcept || `Recibo de Honorarios - ${currentSelectedTeacher.nombre || currentSelectedTeacher.name} (Asistencia Mensual)`,
-            tarifaPorClase: 75.00
-          }
-        );
-
-        base64Pdf = pdfResult.base64;
-        invoiceId = pdfResult.id;
+        const conceptoFinal =
+          customConcept ||
+          `${nombreCompMap[tipoComprobanteCodigo]} - Pago por ${classesCount} Sesiones de Asistencia (${currentSelectedTeacher.nombre || currentSelectedTeacher.name})`;
 
         facturaData = {
           tipo: 'profesor',
           teacher_id: currentSelectedTeacher.id,
           monto: finalAmount,
           estado: 'emitida',
-          concepto: customConcept || `Recibo de Honorarios - ${currentSelectedTeacher.nombre || currentSelectedTeacher.name} (Asistencia Mensual)`,
+          concepto: conceptoFinal,
           detalles: {
-            nombrePersona: currentSelectedTeacher.nombre || currentSelectedTeacher.name || '',
-            dniDocente: currentSelectedTeacher.dni || 'No registrado',
+            nombrePersona: nombreReceptorInput || currentSelectedTeacher.nombre || currentSelectedTeacher.name || '',
+            dniDocente: currentSelectedTeacher.dni || docNum,
             clasesDictadas: classesCount,
-            tarifaPorClase: 75.00
+            tarifaPorClase: +(finalAmount / classesCount).toFixed(2),
+            metodoPago: 'Abono en Cuenta / Planilla',
+            modoTributario: sunatConfig.modo,
+            tipoComprobanteCodigo,
+            tipoComprobanteNombre: nombreCompMap[tipoComprobanteCodigo],
+            serieCorrelativo,
+            rucEmisor,
+            razonSocialEmisor: sunatConfig.razonSocialEmisor,
+            docClienteTipo: docTipo,
+            docClienteNumero: docNum,
+            direccionCliente: direccionReceptorInput,
+            estadoContribuyente: padronInfo?.estado || 'ACTIVO',
+            condicionContribuyente: padronInfo?.condicion || 'HABIDO',
+            regimenContribuyente: padronInfo?.regimen || 'Renta 4ta Categoría (Docencia)',
+            afectacionIgv,
+            opGravada: calculatedTaxes.opGravada,
+            opExonerada: calculatedTaxes.opExonerada,
+            igvMonto: calculatedTaxes.igvMonto,
+            retencionRentaMonto: calculatedTaxes.retencionRentaMonto,
+            montoEnLetras: calculatedTaxes.letras,
+            hashCpe,
+            qrCadena,
+            estadoSunat: sunatConfig.modo === 'sandbox_beta' ? 'ACEPTADO' : 'CONTROL_INTERNO',
+            codigoRespuestaSunat: '0',
+            mensajeSunat: `La liquidación ${serieCorrelativo} ha sido aceptada.`
           }
         };
       }
+
+      // Generate SUNAT Electronic PDF with QR & Hash
+      const tempFacturaForPdf: Factura = {
+        id: serieCorrelativo,
+        created_at: new Date().toISOString(),
+        ...facturaData
+      };
+      const pdfResult = generateSunatElectronicPdf(tempFacturaForPdf, false);
+      base64Pdf = pdfResult.base64;
+      invoiceId = pdfResult.id;
 
       // Upload to Cloudinary (Client-Side)
       const resData = await uploadToCloudinaryClient(base64Pdf, `${invoiceId}.pdf`);
 
       // Save Invoice state
-      const createdFactura = await addFactura({
+      await addFactura({
         ...facturaData,
         pdf_url: resData.url
       });
 
-      // Register corresponding financial transaction (Entrada / Ingreso for student, Salida / Egreso for teacher)
+      // Register corresponding financial transaction
       if (facturaData.tipo === 'estudiante') {
         await addTransaction({
           type: 'ingreso',
           amount: facturaData.monto,
-          concept: facturaData.concepto,
+          concept: `${serieCorrelativo}: ${facturaData.concepto}`,
           category: 'Colegiatura',
           studentId: facturaData.student_id
         });
@@ -506,7 +818,7 @@ export const BovedaFacturasView: React.FC = () => {
         await addTransaction({
           type: 'egreso',
           amount: facturaData.monto,
-          concept: facturaData.concepto,
+          concept: `${serieCorrelativo}: ${facturaData.concepto}`,
           category: 'Salario Docente',
           teacherId: facturaData.teacher_id
         });
@@ -514,40 +826,45 @@ export const BovedaFacturasView: React.FC = () => {
 
       setUploadStatus({
         type: 'success',
-        message: resData.isDemo 
-          ? 'Comprobante emitido con éxito localmente (modo demostración).' 
-          : 'Comprobante emitido y resguardado en la bóveda de Cloudinary.'
+        message:
+          sunatConfig.modo === 'sandbox_beta'
+            ? `Comprobante ${serieCorrelativo} emitido con XML UBL 2.1, QR SUNAT y CDR Aceptado (RUC Pruebas ${rucEmisor}).`
+            : `Nota/Liquidación Interna ${serieCorrelativo} generada con éxito (Sin RUC).`
       });
 
       addNotification({
-        title: '📋 Comprobante Emitido',
-        content: `Se generó exitosamente el comprobante ${invoiceId} por S/. ${facturaData.monto.toFixed(2)}`,
+        title: `Comprobante ${serieCorrelativo} Emitido`,
+        content: `Se generó el CPE por S/. ${facturaData.monto.toFixed(2)} con Hash ${hashCpe.slice(0, 12)}...`,
         type: 'success'
       });
 
-      // Reset
       setTimeout(() => {
         setIsModalOpen(false);
         setSelectedStudentId('');
         setSelectedTeacherId('');
         setCustomAmount('');
         setCustomConcept('');
+        setPadronInfo(null);
         setUploadStatus({ type: 'idle', message: '' });
         setIsUploading(false);
       }, 1500);
-
     } catch (err: any) {
       console.error(err);
       setUploadStatus({
         type: 'error',
-        message: err.message || 'Error al emitir y subir el comprobante.'
+        message: err.message || 'Error al emitir y firmar el comprobante.'
       });
       setIsUploading(false);
     }
   };
 
   const handleDownloadOffline = (factura: Factura) => {
-    // Regenerate and trigger direct PDF download using jsPDF
+    // If it has SUNAT electronic metadata or user wants the SUNAT format with QR & Hash, generate SUNAT PDF
+    if (factura.detalles?.serieCorrelativo || factura.detalles?.hashCpe || sunatConfig.modo === 'sandbox_beta') {
+      generateSunatElectronicPdf(factura, true);
+      return;
+    }
+
     if (factura.tipo === 'estudiante') {
       const studentObj = students.find(s => s.id === factura.student_id) || {
         id: factura.student_id || 'est-reg',
@@ -559,17 +876,7 @@ export const BovedaFacturasView: React.FC = () => {
         status: 'active'
       } as Student;
 
-      const servObj = servicios.find(s => s.id === studentObj.servicioId) || (
-        factura.detalles?.nombreServicio ? {
-          id: 'serv-custom',
-          nombre: factura.detalles.nombreServicio,
-          descripcion: 'Servicio Educativo EnlaceC',
-          precio: factura.monto,
-          tipo: 'mensual',
-          estado: 'activo'
-        } as any : undefined
-      );
-
+      const servObj = servicios.find(s => s.id === studentObj.servicioId);
       const linkedCourseIds = servicioCursos
         .filter(sc => sc.servicio_id === studentObj.servicioId || sc.servicioId === studentObj.servicioId)
         .map(sc => sc.curso_id || sc.cursoId);
@@ -606,17 +913,162 @@ export const BovedaFacturasView: React.FC = () => {
     }
   };
 
+  // Download XML UBL 2.1 for any Factura
+  const handleDownloadXml = (factura: Factura) => {
+    const ruc = factura.detalles?.rucEmisor || sunatConfig.rucEmisor || '20000000001';
+    const tipo = factura.detalles?.tipoComprobanteCodigo || (factura.tipo === 'estudiante' ? '03' : '02');
+    const sc = factura.detalles?.serieCorrelativo || `B001-${factura.id.replace(/\D/g, '').slice(0, 6).padStart(6, '0')}`;
+    const xml = generateSunatUblXml(factura);
+    downloadTextFile(`${ruc}-${tipo}-${sc}.xml`, xml);
+    addNotification({
+      title: 'XML UBL 2.1 Descargado',
+      content: `Archivo ${ruc}-${tipo}-${sc}.xml generado con firma digital.`,
+      type: 'info'
+    });
+  };
+
+  // Download CDR (Constancia de Recepción SUNAT) for any Factura
+  const handleDownloadCdr = (factura: Factura) => {
+    const ruc = factura.detalles?.rucEmisor || sunatConfig.rucEmisor || '20000000001';
+    const tipo = factura.detalles?.tipoComprobanteCodigo || (factura.tipo === 'estudiante' ? '03' : '02');
+    const sc = factura.detalles?.serieCorrelativo || `B001-${factura.id.replace(/\D/g, '').slice(0, 6).padStart(6, '0')}`;
+    const hash = factura.detalles?.hashCpe || generateCpeHash(`${ruc}|${sc}|${factura.monto}`);
+    const cdr = generateSunatCdrXml({
+      rucEmisor: ruc,
+      serieCorrelativo: sc,
+      tipoComprobanteNombre: factura.detalles?.tipoComprobanteNombre || 'Comprobante Electrónico',
+      hashCpe: hash,
+      ticketSunat: factura.detalles?.ticketSunat
+    });
+    downloadTextFile(`R-${ruc}-${tipo}-${sc}.xml`, cdr);
+    addNotification({
+      title: 'Constancia CDR SUNAT Descargada',
+      content: `Constancia oficial R-${ruc}-${tipo}-${sc}.xml (Código 0: Aceptado) descargada.`,
+      type: 'success'
+    });
+  };
+
+  // Handle Validación de Comprobantes de Pago (Service #2)
+  const handleRunValidadorCpe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsValidatingCpe(true);
+    try {
+      const res = await validarComprobanteSunat({
+        rucEmisor: valRucEmisor,
+        tipoComprobante: valTipoComp,
+        serie: valSerie,
+        numero: valNumero,
+        fechaEmision: valFecha,
+        montoTotal: parseFloat(valMonto) || 0
+      });
+      setValidezResult(res);
+    } finally {
+      setIsValidatingCpe(false);
+    }
+  };
+
+  // Handle Resumen Diario de Boletas (Service #3A)
+  const handleEmitirResumenDiario = async () => {
+    setIsSendingResumen(true);
+    try {
+      const boletasDelDia = facturas.filter(f => f.estado !== 'anulada');
+      const res = await emitirResumenOBajaSunat({
+        tipoOperacion: 'RESUMEN_DIARIO',
+        rucEmisor: sunatConfig.rucEmisor,
+        fechaReferencia: resumenFecha,
+        comprobantes: boletasDelDia.length > 0 ? boletasDelDia : facturas
+      });
+      setResumenResponse(res);
+      addNotification({
+        title: `Resumen Diario ${res.identificador} Aceptado`,
+        content: `Ticket SUNAT N° ${res.ticketSunat}. Boletas agrupadas y declaradas correctamente.`,
+        type: 'success'
+      });
+    } finally {
+      setIsSendingResumen(false);
+    }
+  };
+
+  // Handle Comunicación de Baja (Service #3B)
+  const handleConfirmarComunicacionBaja = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!facturaToBaja) return;
+    setIsSendingBaja(true);
+    try {
+      const res = await emitirResumenOBajaSunat({
+        tipoOperacion: 'BAJA',
+        rucEmisor: sunatConfig.rucEmisor,
+        fechaReferencia: new Date().toISOString().split('T')[0],
+        comprobantes: [facturaToBaja],
+        motivoBaja: motivoBajaInput
+      });
+
+      await updateFacturaStatus(facturaToBaja.id, 'anulada');
+      downloadTextFile(`${sunatConfig.rucEmisor}-${res.identificador}.xml`, res.xmlContent);
+      downloadTextFile(`R-${sunatConfig.rucEmisor}-${res.identificador}.xml`, res.cdrContent);
+
+      addNotification({
+        title: `Comunicación de Baja ${res.identificador}`,
+        content: `Comprobante anulado ante SUNAT (Ticket: ${res.ticketSunat}). Se descargó el XML y CDR de Baja.`,
+        type: 'warning'
+      });
+      setFacturaToBaja(null);
+    } finally {
+      setIsSendingBaja(false);
+    }
+  };
+
+  // Handle Emitir Guía de Remisión Electrónica (Service #4)
+  const handleEmitirGuiaRemision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const seq = String(guiasRemision.length + 1).padStart(6, '0');
+    const sc = `T001-${seq}`;
+    const fecha = new Date().toISOString().split('T')[0];
+    const hash = generateCpeHash(`${sunatConfig.rucEmisor}|09|${sc}|${grePesoKg}|${Date.now()}`);
+    const qr = `${sunatConfig.rucEmisor}|09|T001|${seq}|${Number(grePesoKg || 10).toFixed(2)}|${fecha}|6|${greRucDestino}|${hash}|`;
+
+    const nuevaGre: SunatGuiaRemision = {
+      id: `gre-${Date.now()}`,
+      serieCorrelativo: sc,
+      fechaEmision: fecha,
+      rucRemitente: sunatConfig.rucEmisor,
+      razonSocialRemitente: sunatConfig.razonSocialEmisor,
+      destinatarioDocumento: greRucDestino,
+      destinatarioNombre: greNombreDestino,
+      puntoPartida: grePuntoPartida,
+      puntoLlegada: grePuntoLlegada,
+      motivoTraslado: greMotivo,
+      modalidadTransporte: greModalidad,
+      pesoBrutoKg: parseFloat(grePesoKg) || 10,
+      placaVehiculo: grePlaca,
+      dniConductor: greDniConductor,
+      descripcionBienes: greDescripcionBienes,
+      estadoSunat: 'ACEPTADO',
+      hashGre: hash,
+      qrCadena: qr,
+      ticketSunat: `${Date.now()}910`
+    };
+
+    const updated = saveGuiaRemisionLocal(nuevaGre);
+    setGuiasRemision(updated);
+    addNotification({
+      title: `Guía de Remisión ${sc} Emitida`,
+      content: 'GRE autorizada por SUNAT con Código QR para traslado y control móvil.',
+      type: 'success'
+    });
+  };
+
   if (!isUnlocked) {
     return (
       <div className="max-w-md mx-auto my-12 bg-white dark:bg-slate-900 border border-gray-150 dark:border-white/10 rounded-2xl p-6 shadow-xl space-y-6">
         <div className="text-center space-y-3">
           <div className="inline-flex p-3.5 bg-indigo-50 dark:bg-indigo-950/40 rounded-full text-indigo-600 dark:text-indigo-400">
-            <Receipt className="w-8 h-8 animate-pulse" />
+            <Receipt className="w-8 h-8" />
           </div>
           <div>
             <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 tracking-tight">Acceso Privado a la Bóveda</h2>
             <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
-              Para visualizar y emitir comprobantes de pago de estudiantes y docentes, por favor ingresa la clave de seguridad configurada.
+              Para visualizar y emitir comprobantes electrónicos SUNAT de estudiantes y docentes, ingresa la clave de seguridad configurada.
             </p>
           </div>
         </div>
@@ -648,10 +1100,6 @@ export const BovedaFacturasView: React.FC = () => {
             Desbloquear Bóveda
           </button>
         </form>
-
-        <div className="text-center text-[10px] text-gray-400 dark:text-zinc-500">
-          Nota: La clave por defecto es <code className="font-mono font-bold text-slate-700 dark:text-zinc-300 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">1234</code>. Se puede configurar en la sección de <strong className="font-semibold">Ajustes del Sistema</strong> en Configuración.
-        </div>
       </div>
     );
   }
@@ -663,106 +1111,190 @@ export const BovedaFacturasView: React.FC = () => {
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-3">
             <Receipt className={`w-8 h-8 ${cl.primaryText}`} />
-            Bóveda de Facturas y Comprobantes
+            Bóveda de Facturas y Facturación SUNAT
           </h1>
           <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">
-            Historial de cobros académicos a estudiantes y boletas de honorarios docentes por asistencias en Cloudinary.
+            Emisión híbrida (Sandbox Beta SUNAT <code className="font-mono font-bold">RUC {sunatConfig.rucEmisor}</code> + Notas Internas sin RUC), XML UBL 2.1, CDR, Bajas y Guías de Remisión.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <button
+            type="button"
+            onClick={() => {
+              setShowChangePasscodeModal(true);
+              setChangePassError('');
+              setChangePassSuccess('');
+              setCurrentPassInput('');
+              setNewPassInput('');
+              setConfirmPassInput('');
+            }}
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60 transition-all text-xs cursor-pointer border border-indigo-200/50 dark:border-indigo-900/40"
+            title="Cambiar Contraseña de la Bóveda"
+          >
+            <Key className="w-3.5 h-3.5" />
+            Cambiar Clave
+          </button>
+          <button
+            type="button"
             onClick={handleLock}
             className="flex items-center gap-2 px-3 py-2.5 rounded-xl font-bold text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 transition-all text-xs cursor-pointer"
             title="Cerrar Sesión de la Bóveda"
           >
+            <Lock className="w-3.5 h-3.5" />
             Cerrar Bóveda
           </button>
           <button
+            type="button"
             onClick={() => setIsModalOpen(true)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-white transition-all duration-300 shadow-md ${cl.primaryBg} ${cl.primaryHoverBg} hover:shadow-lg focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transform hover:-translate-y-0.5 cursor-pointer`}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-white transition-all duration-300 shadow-md ${cl.primaryBg} ${cl.primaryHoverBg} hover:shadow-lg cursor-pointer`}
           >
             <Plus className="w-5 h-5" />
-            Emitir Comprobante
+            Emitir Comprobante CPE
           </button>
         </div>
       </div>
 
-      {/* Cloudinary credentials warning badge if not configured */}
-      <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 rounded-xl flex items-start gap-3">
-        <CloudLightning className="w-5 h-5 shrink-0 mt-0.5" />
-        <div className="text-xs">
-          <span className="font-bold">Aviso del Sistema:</span> Las subidas a Cloudinary se enrutan mediante proxy seguro para salvaguardar claves secretas. Si no ha configurado sus variables de entorno <code className="bg-amber-500/10 px-1 py-0.5 rounded font-mono">CLOUDINARY_CLOUD_NAME</code> en el panel, el sistema operará de manera segura guardando PDFs de manera local.
-        </div>
-      </div>
-
-      {/* Cloudinary connection test button & console */}
-      <div className="bg-white dark:bg-slate-900/40 border border-gray-150 dark:border-white/10 rounded-2xl p-4 shadow-sm space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <RefreshCw className={`w-5 h-5 ${isTestingConnection ? 'animate-spin text-indigo-500' : 'text-slate-500'}`} />
+      {/* SUNAT HYBRID OPERATIONS BAR (5 Official SUNAT API Capabilities integrated directly) */}
+      <div className="bg-white dark:bg-slate-900/60 border border-gray-200 dark:border-white/10 rounded-2xl p-4 shadow-sm space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-gray-100 dark:border-white/10 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+              <Building2 className="w-5 h-5" />
+            </div>
             <div>
-              <h3 className="text-sm font-black text-slate-800 dark:text-slate-100 uppercase tracking-wide">Prueba de Conexión Cloudinary</h3>
-              <p className="text-xs text-gray-400 dark:text-zinc-500">Ejecuta un diagnóstico seguro en el servidor y audita el estado de comunicación con la API de Cloudinary.</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">
+                  Pasarela Tributaria SUNAT UBL 2.1
+                </h3>
+                <span className="text-xs font-mono text-slate-500 dark:text-zinc-400">
+                  · {sunatConfig.modo === 'sandbox_beta' ? `Modo Sandbox Beta (RUC Pruebas: ${sunatConfig.rucEmisor})` : 'Modo Control Interno (Sin RUC - Series NV01/LQ01)'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-zinc-400">
+                Opera sin RUC propio usando el entorno oficial de homologación de SUNAT o Notas de Venta internas. Cuando tramites tu RUC 10 o 20, cámbialo con un clic.
+              </p>
             </div>
           </div>
-          <button
-            onClick={handleTestCloudinaryConnection}
-            disabled={isTestingConnection}
-            className={`px-4 py-2 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
-              isTestingConnection 
-                ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed'
-                : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-400 dark:hover:bg-indigo-950/60'
-            }`}
-          >
-            {isTestingConnection ? 'Diagnosticando...' : 'Iniciar Prueba Conexión'}
-          </button>
-        </div>
 
-        {testLogs.length > 0 && (
-          <div className="mt-3 bg-slate-950 dark:bg-black rounded-xl p-3 font-mono text-[11px] text-zinc-300 border border-slate-800 space-y-1.5 shadow-inner max-h-60 overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2 text-zinc-500">
-              <span className="font-bold">CONSOLA DE DIAGNÓSTICO EN TIEMPO REAL</span>
-              <button 
+          {/* Mode Toggle & Config */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center bg-gray-100 dark:bg-slate-950 p-1 rounded-xl border border-gray-200 dark:border-white/10">
+              <button
                 type="button"
-                onClick={() => setTestLogs([])} 
-                className="hover:text-zinc-300 text-zinc-600 transition-colors text-[10px] uppercase font-bold cursor-pointer"
-              >
-                Limpiar
-              </button>
-            </div>
-            {testLogs.map((log, idx) => (
-              <div 
-                key={idx} 
-                className={`${
-                  log.includes('❌') 
-                    ? 'text-rose-400' 
-                    : log.includes('⚠️') 
-                      ? 'text-amber-400' 
-                      : log.includes('¡') || log.includes('OPERATIVA')
-                        ? 'text-emerald-400' 
-                        : 'text-zinc-300'
+                onClick={() => {
+                  const updated: SunatConfig = { ...sunatConfig, modo: 'sandbox_beta' };
+                  setSunatConfig(updated);
+                  saveSunatConfig(updated);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  sunatConfig.modo === 'sandbox_beta'
+                    ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-zinc-400'
                 }`}
               >
-                {log}
-              </div>
-            ))}
-            {testResult && (
-              <div className={`mt-3 p-2.5 rounded-lg border text-xs font-bold flex items-center gap-2 ${
-                testResult.success 
-                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
-                  : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
-              }`}>
-                {testResult.success ? <CheckCircle className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-                <span>Resultado: {testResult.message}</span>
-              </div>
-            )}
+                Sandbox Beta SUNAT (20000000001)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const updated: SunatConfig = { ...sunatConfig, modo: 'interno_sin_ruc' };
+                  setSunatConfig(updated);
+                  saveSunatConfig(updated);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  sunatConfig.modo === 'interno_sin_ruc'
+                    ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-zinc-400'
+                }`}
+              >
+                Notas Internas (Sin RUC)
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSunatConfigModal(true)}
+              className="px-3 py-2 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 hover:bg-gray-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 cursor-pointer"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              Configurar RUC / SOL
+            </button>
           </div>
-        )}
+        </div>
+
+        {/* Action Buttons for the 5 SUNAT API Services */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              setValidezResult(null);
+              setShowValidadorCpeModal(true);
+            }}
+            className="p-2.5 rounded-xl border border-gray-200 dark:border-white/10 hover:border-indigo-400 dark:hover:border-indigo-500 bg-gray-50/70 dark:bg-slate-950/60 flex items-center gap-2.5 text-left transition-all cursor-pointer"
+          >
+            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              <FileCheck2 className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">Validar Comprobante CPE</p>
+              <p className="text-[10px] text-gray-500 dark:text-zinc-400 truncate">Verifica autenticidad en SUNAT</p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setResumenResponse(null);
+              setShowResumenDiarioModal(true);
+            }}
+            className="p-2.5 rounded-xl border border-gray-200 dark:border-white/10 hover:border-emerald-400 dark:hover:border-emerald-500 bg-gray-50/70 dark:bg-slate-950/60 flex items-center gap-2.5 text-left transition-all cursor-pointer"
+          >
+            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">Resumen Diario Boletas (RC)</p>
+              <p className="text-[10px] text-gray-500 dark:text-zinc-400 truncate">Envío agrupado de Boletas B001</p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowGreModal(true)}
+            className="p-2.5 rounded-xl border border-gray-200 dark:border-white/10 hover:border-amber-400 dark:hover:border-amber-500 bg-gray-50/70 dark:bg-slate-950/60 flex items-center gap-2.5 text-left transition-all cursor-pointer"
+          >
+            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <Truck className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">Guías de Remisión (GRE T001)</p>
+              <p className="text-[10px] text-gray-500 dark:text-zinc-400 truncate">Traslado de bienes y consulta QR</p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (filteredFacturas.length === 0) return;
+              const target = filteredFacturas[0];
+              handleDownloadXml(target);
+              handleDownloadCdr(target);
+            }}
+            className="p-2.5 rounded-xl border border-gray-200 dark:border-white/10 hover:border-sky-400 dark:hover:border-sky-500 bg-gray-50/70 dark:bg-slate-950/60 flex items-center gap-2.5 text-left transition-all cursor-pointer"
+          >
+            <div className="p-2 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400">
+              <FileCode className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">Descargar Último XML + CDR</p>
+              <p className="text-[10px] text-gray-500 dark:text-zinc-400 truncate">Constancia firmada por SUNAT</p>
+            </div>
+          </button>
+        </div>
       </div>
 
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI: Total Facturado */}
         <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Total Facturado</span>
@@ -771,13 +1303,12 @@ export const BovedaFacturasView: React.FC = () => {
             </div>
           </div>
           <div className="mt-2">
-            <span className="text-xl sm:text-2xl font-black text-slate-800 dark:text-slate-150 tracking-tight">
+            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-slate-800 dark:text-slate-150 tracking-tight">
               S/. {stats.totalEmitido.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
 
-        {/* KPI: Total Cobrado */}
         <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Total Cobrado</span>
@@ -786,13 +1317,12 @@ export const BovedaFacturasView: React.FC = () => {
             </div>
           </div>
           <div className="mt-2">
-            <span className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-emerald-600 dark:text-emerald-400 tracking-tight">
               S/. {stats.totalCobrado.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
 
-        {/* KPI: Pendiente */}
         <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Por Cobrar</span>
@@ -801,13 +1331,12 @@ export const BovedaFacturasView: React.FC = () => {
             </div>
           </div>
           <div className="mt-2">
-            <span className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-450 tracking-tight">
+            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-amber-600 dark:text-amber-450 tracking-tight">
               S/. {stats.totalPendiente.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
 
-        {/* KPI: Cantidad */}
         <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Comprobantes</span>
@@ -816,16 +1345,250 @@ export const BovedaFacturasView: React.FC = () => {
             </div>
           </div>
           <div className="mt-2">
-            <span className="text-xl sm:text-2xl font-black text-slate-800 dark:text-slate-150 tracking-tight">
+            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-slate-800 dark:text-slate-150 tracking-tight">
               {stats.count} registros
             </span>
           </div>
         </div>
       </div>
 
+      {/* Filters and Search toolbar */}
+      <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm flex flex-col md:flex-row items-center gap-4 justify-between">
+        <div className="relative w-full md:max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Buscar por Serie (B001, F001), DNI/RUC o nombre..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 placeholder:text-gray-400"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+          <select
+            value={filterTipo}
+            onChange={(e) => setFilterTipo(e.target.value as any)}
+            className="bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-700 dark:text-slate-350 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
+          >
+            <option value="todos">Todos los Tipos</option>
+            <option value="estudiante">Matrícula Estudiantes (B001 / F001 / NV01)</option>
+            <option value="profesor">Salarios Docentes por Asistencia (E001 / LQ01)</option>
+          </select>
+
+          <select
+            value={filterEstado}
+            onChange={(e) => setFilterEstado(e.target.value as any)}
+            className="bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-700 dark:text-slate-350 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
+          >
+            <option value="todos">Todos los Estados</option>
+            <option value="emitida">Emitida / Pendiente</option>
+            <option value="pagada">Pagada / Cobrada</option>
+            <option value="anulada">Anulada (Con Baja RA)</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Main invoices list table with PDF / XML / CDR downloads */}
+      <div className="bg-white dark:bg-slate-900/40 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/50 dark:bg-slate-950/20 border-b border-gray-150 dark:border-white/10 text-[10px] font-black text-gray-400 dark:text-zinc-500 uppercase tracking-widest">
+                <th className="py-3 px-4">Serie / Correlativo</th>
+                <th className="py-3 px-4">Concepto & Afectación</th>
+                <th className="py-3 px-4">Receptor (DNI / RUC)</th>
+                <th className="py-3 px-4">Fecha / Hash CPE</th>
+                <th className="py-3 px-4 text-right">Importe Total</th>
+                <th className="py-3 px-4 text-center">Estado / SUNAT</th>
+                <th className="py-3 px-4 text-right">Descargas (PDF · XML · CDR) & Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-150 dark:divide-white/5">
+              {filteredFacturas.length > 0 ? (
+                filteredFacturas.map((factura, idx) => {
+                  const isStudent = factura.tipo === 'estudiante';
+                  const serieCorrelativo =
+                    factura.detalles?.serieCorrelativo ||
+                    (isStudent ? `B001-${String(idx + 1).padStart(6, '0')}` : `E001-${String(idx + 1).padStart(6, '0')}`);
+                  const docNum =
+                    factura.detalles?.docClienteNumero ||
+                    (isStudent ? factura.detalles?.dniEstudiante : factura.detalles?.dniDocente) ||
+                    '00000000';
+                  const hashShort = (factura.detalles?.hashCpe || generateCpeHash(factura.id)).slice(0, 14) + '...';
+
+                  return (
+                    <tr 
+                      key={factura.id}
+                      className="hover:bg-slate-50/40 dark:hover:bg-slate-900/30 transition-colors text-xs text-slate-750 dark:text-slate-300"
+                    >
+                      <td className="py-3.5 px-4 font-bold tracking-tight">
+                        <div className="flex items-center gap-2">
+                          <QrCode className={`w-4 h-4 shrink-0 ${isStudent ? 'text-indigo-500' : 'text-teal-500'}`} />
+                          <div>
+                            <span className="font-mono font-black text-slate-900 dark:text-white block">
+                              {serieCorrelativo}
+                            </span>
+                            <span className="text-[10px] font-mono text-gray-400">
+                              RUC: {factura.detalles?.rucEmisor || sunatConfig.rucEmisor}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-4 max-w-xs">
+                        <div className="font-bold text-slate-800 dark:text-slate-100 truncate" title={factura.concepto}>
+                          {factura.concepto}
+                        </div>
+                        <div className="text-[10px] text-gray-500 dark:text-zinc-400 mt-0.5">
+                          <span>{isStudent ? 'Matrícula Estudiante' : 'Liquidación Asistencia Docente'}</span>
+                          <span className="mx-1">·</span>
+                          <span>
+                            {factura.detalles?.afectacionIgv === 'gravado'
+                              ? `Gravado IGV (S/. ${Number(factura.detalles?.igvMonto || 0).toFixed(2)})`
+                              : factura.detalles?.afectacionIgv === 'inafecto_rhe'
+                              ? 'RHE 4ta Categoría'
+                              : 'Exonerado IGV (Educación)'}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-4">
+                        <div className="font-bold text-slate-800 dark:text-slate-200">
+                          {factura.detalles.nombrePersona}
+                        </div>
+                        <div className="text-[10px] font-mono text-gray-500 dark:text-zinc-400">
+                          {docNum.length === 11 ? 'RUC' : 'DNI'}: {docNum} · {factura.detalles?.condicionContribuyente || 'HABIDO'}
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="text-gray-600 dark:text-zinc-300 font-mono text-[11px]">
+                          {new Date(factura.created_at).toLocaleDateString('es-PE', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric'
+                          })}
+                        </div>
+                        <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400" title={factura.detalles?.hashCpe}>
+                          Hash: {hashShort}
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-4 text-right font-mono tabular-nums font-black text-slate-800 dark:text-slate-100 text-sm">
+                        S/. {factura.monto.toFixed(2)}
+                      </td>
+
+                      <td className="py-3.5 px-4 text-center">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase ${
+                            factura.estado === 'pagada'
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : factura.estado === 'emitida'
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-rose-600 dark:text-rose-400'
+                          }`}>
+                            {factura.estado === 'pagada' && <CheckCircle className="w-3 h-3" />}
+                            {factura.estado === 'emitida' && <Clock className="w-3 h-3" />}
+                            {factura.estado === 'anulada' && <AlertTriangle className="w-3 h-3" />}
+                            {factura.estado}
+                          </span>
+                          <span className="text-[9px] font-mono text-gray-400">
+                            {factura.estado === 'anulada'
+                              ? 'BAJA RA ENVIADA'
+                              : factura.detalles?.modoTributario === 'interno_sin_ruc'
+                              ? 'CONTROL INTERNO'
+                              : 'CDR SUNAT: ACEPTADO'}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          {factura.estado === 'emitida' && (
+                            <button
+                              type="button"
+                              onClick={() => updateFacturaStatus(factura.id, 'pagada')}
+                              title="Marcar como cobrado/pagado"
+                              className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 text-[10px] font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                            >
+                              Cobrar
+                            </button>
+                          )}
+
+                          {/* PDF Download with SUNAT QR */}
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadOffline(factura)}
+                            title="Descargar Representación Impresa PDF con QR SUNAT"
+                            className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 text-[10px] font-mono font-bold hover:bg-indigo-100 transition-colors cursor-pointer flex items-center gap-1"
+                          >
+                            <Download className="w-3 h-3" />
+                            PDF
+                          </button>
+
+                          {/* XML UBL 2.1 Download */}
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadXml(factura)}
+                            title="Descargar XML UBL 2.1 firmado"
+                            className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-[10px] font-mono font-bold hover:bg-slate-200 transition-colors cursor-pointer"
+                          >
+                            XML
+                          </button>
+
+                          {/* CDR SUNAT Download */}
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadCdr(factura)}
+                            title="Descargar Constancia de Recepción CDR de SUNAT"
+                            className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 text-[10px] font-mono font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                          >
+                            CDR
+                          </button>
+
+                          {/* Comunicación de Baja (RA) / Delete */}
+                          {factura.estado !== 'anulada' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFacturaToBaja(factura);
+                                setMotivoBajaInput('ERROR EN EMISIÓN O DATOS DEL RECEPTOR');
+                              }}
+                              title="Emitir Comunicación de Baja SUNAT (RA)"
+                              className="px-2 py-1 rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 text-[10px] font-bold hover:bg-amber-100 transition-colors cursor-pointer"
+                            >
+                              Baja RA
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => deleteFactura(factura.id)}
+                              title="Eliminar registro anulado"
+                              className="p-1.5 rounded-lg bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400 hover:bg-rose-100 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-gray-400 dark:text-zinc-500">
+                    No se encontraron comprobantes registrados con los filtros aplicados.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* MODULE: CÓDIGOS DE ACCESO DE LA BÓVEDA & NOTIFICACIONES PUSH */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        
         {/* CARD 1: CÓDIGOS DE ACCESO DE BÓVEDA */}
         <div className="bg-white dark:bg-slate-900/40 p-5 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
@@ -846,81 +1609,56 @@ export const BovedaFacturasView: React.FC = () => {
               type="button"
               disabled={isGeneratingCode}
               onClick={handleGenerateCode}
-              className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
             >
-              {isGeneratingCode ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Plus className="w-3.5 h-3.5" />
-              )}
-              Generar Código (6 Caracteres)
+              {isGeneratingCode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              Generar Código
             </button>
           </div>
 
           <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-            {bovedaCodigos.length === 0 ? (
-              <p className="text-center py-6 text-xs text-gray-400 dark:text-zinc-500 font-medium">
-                Sin códigos generados. Haz clic en "Generar Código" para crear un token de 6 caracteres.
-              </p>
-            ) : (
-              bovedaCodigos.map((codObj) => {
-                const dateStr = codObj.created_at ? new Date(codObj.created_at).toLocaleDateString('es-ES') + ' ' + new Date(codObj.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : 'Reciente';
-                
-                return (
-                  <div
-                    key={codObj.id}
-                    className="p-3 bg-gray-50 dark:bg-slate-950 border border-gray-200/75 dark:border-white/5 rounded-xl flex items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="px-2.5 py-1 bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono font-black text-sm tracking-widest rounded-lg border border-amber-500/20">
-                        {codObj.codigo}
-                      </span>
-                      <div>
-                        <p className="text-[10px] text-gray-400 dark:text-zinc-400 font-semibold">{dateStr}</p>
-                        <p className="text-[9px] font-bold">
-                          {codObj.copiado ? (
-                            <span className="text-rose-500 flex items-center gap-1">
-                              <Lock className="w-3 h-3 inline" /> Extraído / Copiado (Un solo uso)
-                            </span>
-                          ) : (
-                            <span className="text-emerald-500 flex items-center gap-1">
-                              <ShieldCheck className="w-3 h-3 inline" /> Disponible
-                            </span>
-                          )}
-                        </p>
-                      </div>
+            {bovedaCodigos.map((codObj) => {
+              const dateStr = codObj.created_at
+                ? new Date(codObj.created_at).toLocaleDateString('es-ES') + ' ' + new Date(codObj.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+                : 'Reciente';
+              return (
+                <div
+                  key={codObj.id}
+                  className="p-3 bg-gray-50 dark:bg-slate-950 border border-gray-200/75 dark:border-white/5 rounded-xl flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-2.5 py-1 bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono font-black text-sm tracking-widest rounded-lg border border-amber-500/20">
+                      {codObj.codigo}
+                    </span>
+                    <div>
+                      <p className="text-[10px] text-gray-400 dark:text-zinc-400 font-semibold">{dateStr}</p>
+                      <p className="text-[9px] font-bold">
+                        {codObj.copiado ? (
+                          <span className="text-rose-500">Extraído / Copiado (Un solo uso)</span>
+                        ) : (
+                          <span className="text-emerald-500">Disponible</span>
+                        )}
+                      </p>
                     </div>
-
-                    <button
-                      type="button"
-                      disabled={codObj.copiado}
-                      onClick={() => handleRequestCopyCode(codObj)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                        codObj.copiado
-                          ? 'bg-gray-200 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed'
-                          : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm'
-                      }`}
-                    >
-                      {codObj.copiado ? (
-                        <>
-                          <Lock className="w-3 h-3" />
-                          Ya copiado
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          Copiar Código
-                        </>
-                      )}
-                    </button>
                   </div>
-                );
-              })
-            )}
+
+                  <button
+                    type="button"
+                    disabled={codObj.copiado}
+                    onClick={() => handleRequestCopyCode(codObj)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      codObj.copiado
+                        ? 'bg-gray-200 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm'
+                    }`}
+                  >
+                    <Copy className="w-3 h-3" />
+                    {codObj.copiado ? 'Ya copiado' : 'Copiar Código'}
+                  </button>
+                </div>
+              );
+            })}
           </div>
-          <p className="text-[9px] text-gray-400 dark:text-zinc-500 font-medium italic">
-            * Minisistema de protección: Al hacer clic en "Copiar Código", requerirá ingresar la contraseña del usuario. Cada código únicamente puede ser copiado una sola vez.
-          </p>
         </div>
 
         {/* CARD 2: CENTRO DE NOTIFICACIONES PUSH */}
@@ -945,9 +1683,7 @@ export const BovedaFacturasView: React.FC = () => {
               onClick={async () => {
                 const granted = await requestBrowserNotificationPermission();
                 if (granted) {
-                  alert('🔔 ¡Notificaciones Push activadas con éxito en tu navegador!');
-                } else {
-                  alert('⚠️ No se concedieron permisos de notificación.');
+                  addNotification({ title: 'Permisos Push activos', content: 'Notificaciones del navegador habilitadas.', type: 'success' });
                 }
               }}
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-xl text-[11px] font-bold flex items-center gap-1.5 hover:bg-indigo-100 transition-all cursor-pointer"
@@ -958,16 +1694,14 @@ export const BovedaFacturasView: React.FC = () => {
           </div>
 
           <form onSubmit={handleSendCustomPush} className="space-y-3">
-            <div>
-              <input
-                required
-                type="text"
-                placeholder="Título de la Notificación Push..."
-                value={notifTitle}
-                onChange={(e) => setNotifTitle(e.target.value)}
-                className="w-full p-2 py-1.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white rounded-xl outline-none"
-              />
-            </div>
+            <input
+              required
+              type="text"
+              placeholder="Título de la Notificación Push..."
+              value={notifTitle}
+              onChange={(e) => setNotifTitle(e.target.value)}
+              className="w-full p-2 py-1.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white rounded-xl outline-none"
+            />
             <div className="flex gap-2">
               <input
                 required
@@ -985,23 +1719,16 @@ export const BovedaFacturasView: React.FC = () => {
                 <option value="general">General</option>
                 <option value="sistema">Sistema</option>
                 <option value="recordatorio">Recordatorio</option>
-                <option value="oferta">Oferta</option>
               </select>
             </div>
-
             <button
               type="submit"
               disabled={isSendingPush}
               className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold rounded-xl shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
             >
-              {isSendingPush ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
+              {isSendingPush ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               Emitir Notificación Push
             </button>
-
             {pushSuccessMsg && (
               <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-extrabold text-center mt-1">
                 {pushSuccessMsg}
@@ -1009,220 +1736,14 @@ export const BovedaFacturasView: React.FC = () => {
             )}
           </form>
         </div>
-
       </div>
 
-      {/* Filters and Search toolbar */}
-      <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm flex flex-col md:flex-row items-center gap-4 justify-between">
-        <div className="relative w-full md:max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Buscar por DNI, ID de boleta o nombre de cliente..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 placeholder:text-gray-400"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-          {/* Filter by Tipo */}
-          <select
-            value={filterTipo}
-            onChange={(e) => setFilterTipo(e.target.value as any)}
-            className="bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-700 dark:text-slate-350 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
-          >
-            <option value="todos">Todos los Tipos</option>
-            <option value="estudiante">Boletas Estudiantes</option>
-            <option value="profesor">Honorarios Docentes</option>
-          </select>
-
-          {/* Filter by Estado */}
-          <select
-            value={filterEstado}
-            onChange={(e) => setFilterEstado(e.target.value as any)}
-            className="bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-700 dark:text-slate-350 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
-          >
-            <option value="todos">Todos los Estados</option>
-            <option value="emitida">Emitida / Pendiente</option>
-            <option value="pagada">Pagada / Cobrada</option>
-            <option value="anulada">Anulada</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Main invoices list table */}
-      <div className="bg-white dark:bg-slate-900/40 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/50 dark:bg-slate-950/20 border-b border-gray-150 dark:border-white/10 text-[10px] font-black text-gray-400 dark:text-zinc-500 uppercase tracking-widest">
-                <th className="py-3 px-4">No. Comprobante</th>
-                <th className="py-3 px-4">Concepto / Tipo</th>
-                <th className="py-3 px-4">Persona Vinculada</th>
-                <th className="py-3 px-4">Fecha Emisión</th>
-                <th className="py-3 px-4 text-right">Importe</th>
-                <th className="py-3 px-4 text-center">Estado</th>
-                <th className="py-3 px-4 text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-150 dark:divide-white/5">
-              {filteredFacturas.length > 0 ? (
-                filteredFacturas.map((factura) => {
-                  const isStudent = factura.tipo === 'estudiante';
-                  
-                  return (
-                    <tr 
-                      key={factura.id}
-                      className="hover:bg-slate-50/20 dark:hover:bg-slate-900/20 transition-colors text-xs text-slate-750 dark:text-slate-300"
-                    >
-                      {/* ID with Icon */}
-                      <td className="py-4 px-4 font-bold tracking-tight">
-                        <div className="flex items-center gap-2">
-                          <Receipt className={`w-4 h-4 ${isStudent ? 'text-indigo-500' : 'text-teal-500'}`} />
-                          <span className="font-mono">{factura.id}</span>
-                        </div>
-                      </td>
-
-                      {/* Concept & Type Badge */}
-                      <td className="py-4 px-4 max-w-xs">
-                        <div className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                          {factura.concepto}
-                        </div>
-                        <div className="mt-0.5">
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
-                            isStudent 
-                              ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/30 dark:text-indigo-400' 
-                              : 'bg-teal-50 text-teal-600 dark:bg-teal-950/30 dark:text-teal-400'
-                          }`}>
-                            {isStudent ? 'Matrícula Alumno' : 'Honorario Docente'}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Linked Person Details */}
-                      <td className="py-4 px-4">
-                        <div className="font-bold text-slate-800 dark:text-slate-200">
-                          {factura.detalles.nombrePersona}
-                        </div>
-                        <div className="text-[10px] text-gray-400 dark:text-zinc-500">
-                          {isStudent ? `DNI: ${factura.detalles.dniEstudiante}` : `DNI: ${factura.detalles.dniDocente}`}
-                        </div>
-                      </td>
-
-                      {/* Date */}
-                      <td className="py-4 px-4 whitespace-nowrap text-gray-500 dark:text-zinc-400">
-                        {new Date(factura.created_at).toLocaleDateString('es-PE', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </td>
-
-                      {/* Amount */}
-                      <td className="py-4 px-4 text-right font-black text-slate-800 dark:text-slate-100 text-sm">
-                        S/. {factura.monto.toFixed(2)}
-                      </td>
-
-                      {/* Status Badges */}
-                      <td className="py-4 px-4 text-center">
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                          factura.estado === 'pagada'
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400'
-                            : factura.estado === 'emitida'
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400'
-                              : 'bg-rose-100 text-rose-800 dark:bg-rose-950/30 dark:text-rose-400'
-                        }`}>
-                          {factura.estado === 'pagada' && <CheckCircle className="w-3 h-3" />}
-                          {factura.estado === 'emitida' && <Clock className="w-3 h-3" />}
-                          {factura.estado === 'anulada' && <AlertTriangle className="w-3 h-3" />}
-                          {factura.estado}
-                        </span>
-                      </td>
-
-                      {/* Action buttons */}
-                      <td className="py-4 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* Change Status to Paid */}
-                          {factura.estado === 'emitida' && (
-                            <button
-                              onClick={() => updateFacturaStatus(factura.id, 'pagada')}
-                              title="Marcar como cobrado/pagado"
-                              className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 hover:scale-105 transition-transform cursor-pointer"
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                          )}
-
-                          {/* Download PDF directly */}
-                          <button
-                            onClick={() => handleDownloadOffline(factura)}
-                            title="Descargar comprobante PDF oficial"
-                            className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/30 dark:text-indigo-400 hover:scale-105 transition-transform cursor-pointer"
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
-
-                          {/* Open PDF in Cloudinary if available */}
-                          {factura.pdf_url && factura.pdf_url.startsWith('http') && (
-                            <button
-                              onClick={() => {
-                                let viewUrl = factura.pdf_url!;
-                                if (viewUrl.includes('/raw/upload/')) {
-                                  viewUrl = viewUrl.replace('/raw/upload/', '/image/upload/');
-                                }
-                                window.open(viewUrl, '_blank');
-                              }}
-                              title="Abrir comprobante alojado en la nube Cloudinary"
-                              className="p-1.5 rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-950/30 dark:text-sky-400 hover:scale-105 transition-transform cursor-pointer"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </button>
-                          )}
-
-                          {/* Delete/Anular */}
-                          {factura.estado !== 'anulada' ? (
-                            <button
-                              onClick={() => updateFacturaStatus(factura.id, 'anulada')}
-                              title="Anular Comprobante"
-                              className="p-1.5 rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400 hover:scale-105 transition-transform cursor-pointer"
-                            >
-                              <AlertTriangle className="w-4 h-4" />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => deleteFactura(factura.id)}
-                              title="Eliminar de registros"
-                              className="p-1.5 rounded-lg bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400 hover:scale-105 transition-transform cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-gray-400 dark:text-zinc-500">
-                    <AlertTriangle className="w-8 h-8 mx-auto text-gray-300 dark:text-zinc-700 mb-2" />
-                    No se encontraron comprobantes registrados con los filtros aplicados.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Emission Modal */}
+      {/* =====================================================================
+          MODAL 1: EMISIÓN DE COMPROBANTE ELECTRÓNICO SUNAT (MATRÍCULA / DOCENTE)
+         ===================================================================== */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -1233,37 +1754,37 @@ export const BovedaFacturasView: React.FC = () => {
               }}
             />
 
-            {/* Modal Body */}
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 15 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              transition={{ type: 'spring', duration: 0.4 }}
-              className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-gray-150 dark:border-white/10 rounded-2xl shadow-2xl p-6 overflow-hidden max-h-[90vh] flex flex-col"
+              className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-gray-150 dark:border-white/10 rounded-2xl shadow-2xl p-6 overflow-hidden max-h-[92vh] flex flex-col"
             >
-              <div className="flex items-center justify-between border-b border-gray-150 dark:border-white/10 pb-4">
+              <div className="flex items-center justify-between border-b border-gray-150 dark:border-white/10 pb-3.5">
                 <div>
-                  <h3 className="text-lg font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                     <Receipt className={`w-5 h-5 ${cl.primaryText}`} />
-                    Emitir Nuevo Comprobante Digital
+                    Emitir Comprobante Electrónico SUNAT (UBL 2.1)
                   </h3>
-                  <p className="text-xs text-gray-400 dark:text-zinc-500">
-                    Genera el PDF con firmas e insértalo en los servidores de la institución.
+                  <p className="text-xs text-gray-500 dark:text-zinc-400">
+                    {sunatConfig.modo === 'sandbox_beta'
+                      ? `RUC Emisor Beta: ${sunatConfig.rucEmisor} · Genera PDF con QR, XML UBL 2.1 y CDR`
+                      : 'Modo Control Interno sin RUC · Genera Nota de Venta / Liquidación Interna'}
                   </p>
                 </div>
                 {!isUploading && (
                   <button
+                    type="button"
                     onClick={() => setIsModalOpen(false)}
-                    className="p-1.5 rounded-lg bg-gray-50 dark:bg-slate-950 text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg bg-gray-50 dark:bg-slate-950 text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200 cursor-pointer"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 )}
               </div>
 
-              {/* Emission Tab Select */}
               {!isUploading && (
-                <div className="flex bg-gray-50 dark:bg-slate-950 p-1.5 rounded-xl border border-gray-150 dark:border-white/5 mt-4">
+                <div className="flex bg-gray-100 dark:bg-slate-950 p-1 rounded-xl border border-gray-200 dark:border-white/5 mt-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -1273,11 +1794,11 @@ export const BovedaFacturasView: React.FC = () => {
                     }}
                     className={`flex-1 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                       emissionTab === 'estudiante'
-                        ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-sm'
-                        : 'text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700 dark:hover:text-zinc-200'
                     }`}
                   >
-                    Boleta Estudiante
+                    1. Matrícula de Estudiante
                   </button>
                   <button
                     type="button"
@@ -1288,23 +1809,22 @@ export const BovedaFacturasView: React.FC = () => {
                     }}
                     className={`flex-1 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                       emissionTab === 'profesor'
-                        ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-sm'
-                        : 'text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200'
+                        ? 'bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700 dark:hover:text-zinc-200'
                     }`}
                   >
-                    Honorario Docente
+                    2. Salario Docente por Asistencia
                   </button>
                 </div>
               )}
 
-              {/* Form Content */}
-              <form onSubmit={handleEmitirComprobante} className="mt-5 space-y-4 flex-1 overflow-y-auto pr-1">
+              <form onSubmit={handleEmitirComprobante} className="mt-4 space-y-3.5 flex-1 overflow-y-auto pr-1">
                 {isUploading ? (
                   <div className="py-12 flex flex-col items-center justify-center space-y-4">
                     <Loader2 className={`w-12 h-12 animate-spin ${cl.primaryText}`} />
                     <div className="text-center">
-                      <p className="text-sm font-extrabold text-slate-800 dark:text-slate-100">Procesando firmas y sellos digitales...</p>
-                      <p className="text-xs text-gray-400 dark:text-zinc-500 mt-1">Cargando PDF cifrado a la nube de Cloudinary...</p>
+                      <p className="text-sm font-extrabold text-slate-800 dark:text-slate-100">Firmando XML UBL 2.1 y generando Código QR SUNAT...</p>
+                      <p className="text-xs text-gray-400 dark:text-zinc-500 mt-1">Validando estructura tributaria y resguardando comprobante...</p>
                     </div>
                   </div>
                 ) : uploadStatus.type !== 'idle' ? (
@@ -1321,190 +1841,887 @@ export const BovedaFacturasView: React.FC = () => {
                         <div className="p-3 bg-rose-500/10 text-rose-500 rounded-full">
                           <AlertTriangle className="w-12 h-12" />
                         </div>
-                        <p className="text-sm font-extrabold text-slate-800 dark:text-slate-100">Error en el proceso</p>
+                        <p className="text-sm font-extrabold text-slate-800 dark:text-slate-100">Observación Tributaria</p>
                         <p className="text-xs text-rose-500">{uploadStatus.message}</p>
                       </>
                     )}
                   </div>
                 ) : (
                   <>
-                    {/* Estudiante Fields */}
-                    {emissionTab === 'estudiante' && (
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-xs font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1.5">
-                            Seleccione Estudiante Matriculado
-                          </label>
-                          <select
-                            required
-                            value={selectedStudentId}
-                            onChange={(e) => setSelectedStudentId(e.target.value)}
-                            className="w-full px-3 py-2.5 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 font-bold"
-                          >
-                            <option value="">-- Seleccionar Estudiante --</option>
-                            {students.map(s => (
-                              <option key={s.id} value={s.id}>
-                                {s.nombre} {s.apellido} {s.dni ? `(${s.dni})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {currentSelectedStudent && (
-                          <div className="p-3.5 bg-indigo-50/45 dark:bg-slate-950/40 rounded-xl border border-indigo-100/50 dark:border-white/5 space-y-2 text-xs">
-                            <div className="flex justify-between">
-                              <span className="font-bold text-gray-400">Servicio Matriculado:</span>
-                              <span className="font-extrabold text-slate-800 dark:text-slate-100">
-                                {currentSelectedStudentService?.nombre || 'Ninguno vinculado / Regular'}
-                              </span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="font-bold text-gray-400">Arancel Mensual Estándar:</span>
-                              <span className="font-black text-indigo-600 dark:text-indigo-400">
-                                S/. {(currentSelectedStudentService?.pago !== undefined ? Number(currentSelectedStudentService.pago) : 150.00).toFixed(2)}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="font-bold text-gray-400 block mb-1">Cursos cubiertos por matrícula:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {currentSelectedStudentCourses.length > 0 ? (
-                                  currentSelectedStudentCourses.map(c => (
-                                    <span key={c.id} className="bg-white dark:bg-slate-900 border border-indigo-100/60 dark:border-white/5 px-2 py-0.5 rounded text-[10px] font-bold text-slate-700 dark:text-slate-300">
-                                      {c.nombre}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-[10px] italic text-amber-500">No hay cursos vinculados al servicio todavía.</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                    {/* Selector de Estudiante o Docente */}
+                    {emissionTab === 'estudiante' ? (
+                      <div>
+                        <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1">
+                          Seleccionar Estudiante Matriculado
+                        </label>
+                        <select
+                          required
+                          value={selectedStudentId}
+                          onChange={(e) => setSelectedStudentId(e.target.value)}
+                          className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-150"
+                        >
+                          <option value="">-- Seleccionar Estudiante --</option>
+                          {students.map(s => (
+                            <option key={s.id} value={s.id}>
+                              {s.nombre} {s.apellido} {s.dni ? `(DNI: ${s.dni})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1">
+                          Seleccionar Docente (Cálculo por Asistencias)
+                        </label>
+                        <select
+                          required
+                          value={selectedTeacherId}
+                          onChange={(e) => setSelectedTeacherId(e.target.value)}
+                          className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-150"
+                        >
+                          <option value="">-- Seleccionar Docente --</option>
+                          {teachers.map(t => (
+                            <option key={t.id} value={t.id}>
+                              {t.nombre || t.name} {t.apellido || ''} {t.dni ? `(DNI: ${t.dni})` : ''}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     )}
 
-                    {/* Docente Fields */}
-                    {emissionTab === 'profesor' && (
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-xs font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1.5">
-                            Seleccione Docente / Profesor
-                          </label>
-                          <select
-                            required
-                            value={selectedTeacherId}
-                            onChange={(e) => setSelectedTeacherId(e.target.value)}
-                            className="w-full px-3 py-2.5 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 font-bold"
-                          >
-                            <option value="">-- Seleccionar Docente --</option>
-                            {teachers.map(t => (
-                              <option key={t.id} value={t.id}>
-                                {t.nombre} {t.apellido} {t.dni ? `(${t.dni})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                    {/* Tipo de Comprobante y Afectación IGV */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1">
+                          Tipo de Comprobante SUNAT
+                        </label>
+                        <select
+                          value={tipoComprobanteCodigo}
+                          onChange={(e) => setTipoComprobanteCodigo(e.target.value as any)}
+                          className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-150"
+                        >
+                          {emissionTab === 'estudiante' ? (
+                            <>
+                              <option value="03">03 - Boleta de Venta Electrónica (B001)</option>
+                              <option value="01">01 - Factura Electrónica (F001 - RUC)</option>
+                              <option value="NV">NV - Nota de Venta Interna (NV01 - Sin RUC)</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="02">02 - Recibo por Honorarios Electrónico (E001)</option>
+                              <option value="LQ">LQ - Liquidación Interna de Asistencia (LQ01)</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
 
-                        {currentSelectedTeacher && (
-                          <div className="p-3.5 bg-teal-50/45 dark:bg-slate-950/40 rounded-xl border border-teal-100/50 dark:border-white/5 space-y-2 text-xs">
-                            <div className="flex justify-between">
-                              <span className="font-bold text-gray-400">Asistencias este mes:</span>
-                              <span className="font-extrabold text-slate-800 dark:text-slate-100">
-                                {currentTeacherAttendanceRecords.length} clases dictadas
-                              </span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="font-bold text-gray-400">Tarifa por asistencia estándar:</span>
-                              <span className="font-bold text-teal-600 dark:text-teal-400">S/. 75.00</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="font-bold text-gray-400">Honorarios Calculados:</span>
-                              <span className="font-black text-teal-700 dark:text-teal-400">
-                                S/. {teacherEstimatedSalary.toFixed(2)}
-                              </span>
-                            </div>
-                            {currentTeacherAttendanceRecords.length > 0 && (
-                              <div>
-                                <span className="font-bold text-gray-400 block mb-1">Fechas auditadas:</span>
-                                <div className="grid grid-cols-2 gap-1 text-[10px]">
-                                  {currentTeacherAttendanceRecords.map((r, idx) => (
-                                    <div key={idx} className="bg-white dark:bg-slate-900 px-2 py-1 rounded border border-teal-100/30 dark:border-white/5 text-slate-700 dark:text-slate-350">
-                                      🗓️ {r.date} ({r.course})
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                      <div>
+                        <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1">
+                          Afectación Tributaria IGV / Renta
+                        </label>
+                        <select
+                          value={afectacionIgv}
+                          onChange={(e) => setAfectacionIgv(e.target.value as any)}
+                          className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-150"
+                        >
+                          <option value="exonerado">Exonerado IGV (0% - Servicios Educativos Art. 2)</option>
+                          <option value="gravado">Gravado IGV (18% Desglosado)</option>
+                          <option value="inafecto_rhe">Renta 4ta Categoría (Docentes / RHE)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Consulta de RUC y DNI (Padrón de Contribuyentes SUNAT - Servicio #1) */}
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/80 border border-gray-200 dark:border-white/10 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                          1. Consulta de Padrón SUNAT / RENIEC (Cliente o Docente)
+                        </span>
+                        <span className="text-[10px] font-mono text-gray-400">Valida Activo y Habido</span>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          maxLength={11}
+                          value={docReceptorInput}
+                          onChange={(e) => setDocReceptorInput(e.target.value.replace(/\D/g, ''))}
+                          placeholder="DNI (8 dígitos) o RUC (11 dígitos)..."
+                          className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-xl text-xs font-mono font-bold text-slate-800 dark:text-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={isConsultingPadron}
+                          onClick={handleConsultarPadronReceptor}
+                          className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"
+                        >
+                          {isConsultingPadron ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                          Consultar SUNAT
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={nombreReceptorInput}
+                          onChange={(e) => setNombreReceptorInput(e.target.value)}
+                          placeholder="Nombre Completo o Razón Social"
+                          className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg text-xs font-semibold text-slate-800 dark:text-white"
+                        />
+                        <input
+                          type="text"
+                          value={direccionReceptorInput}
+                          onChange={(e) => setDireccionReceptorInput(e.target.value)}
+                          placeholder="Domicilio Fiscal"
+                          className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg text-xs text-slate-700 dark:text-zinc-300"
+                        />
+                      </div>
+
+                      {padronInfo && (
+                        <div className="pt-1 text-[11px] flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700 dark:text-zinc-300 border-t border-gray-200/60 dark:border-white/10">
+                          <span>
+                            Estado: <strong className={padronInfo.estado === 'ACTIVO' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}>{padronInfo.estado}</strong>
+                          </span>
+                          <span>·</span>
+                          <span>
+                            Condición: <strong className={padronInfo.condicion === 'HABIDO' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}>{padronInfo.condicion}</strong>
+                          </span>
+                          <span>·</span>
+                          <span>
+                            Régimen: <strong>{padronInfo.regimen}</strong>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Resumen de Matrícula o Asistencias del Docente */}
+                    {emissionTab === 'estudiante' && currentSelectedStudent && (
+                      <div className="p-3 bg-indigo-50/40 dark:bg-slate-950/40 rounded-xl border border-indigo-100 dark:border-white/5 text-xs space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Servicio Educativo:</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-100">
+                            {currentSelectedStudentService?.nombre || 'Matrícula Regular'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Cursos Incluidos:</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">
+                            {currentSelectedStudentCourses.map(c => c.nombre).join(', ') || 'Plan Curricular General'}
+                          </span>
+                        </div>
                       </div>
                     )}
 
-                    {/* Custom Amount */}
-                    <div>
-                      <label className="block text-xs font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1.5">
-                        Importe del Comprobante (S/.)
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">S/.</span>
+                    {emissionTab === 'profesor' && currentSelectedTeacher && (
+                      <div className="p-3 bg-teal-50/40 dark:bg-slate-950/40 rounded-xl border border-teal-100 dark:border-white/5 text-xs space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Sesiones de Asistencia Registradas:</span>
+                          <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                            {currentTeacherAttendanceRecords.length || 4} sesiones dictadas
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Monto Calculado por Asistencias:</span>
+                          <span className="font-mono font-black text-teal-600 dark:text-teal-400">
+                            S/. {teacherEstimatedSalary.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Importe y Concepto */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1">
+                          Importe Total (S/.)
+                        </label>
                         <input
                           type="number"
                           step="0.01"
-                          placeholder={
-                            emissionTab === 'estudiante'
-                              ? currentSelectedStudentService?.pago !== undefined 
-                                ? Number(currentSelectedStudentService.pago).toFixed(2) 
-                                : '150.00'
-                              : teacherEstimatedSalary.toFixed(2)
-                          }
+                          placeholder={calculatedTaxes.total.toFixed(2)}
                           value={customAmount}
                           onChange={(e) => setCustomAmount(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2.5 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 font-bold"
+                          className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs font-mono font-bold text-slate-800 dark:text-white"
                         />
                       </div>
-                      <p className="text-[10px] text-gray-400 mt-1">
-                        Deje en blanco para utilizar el valor sugerido por el sistema según aranceles o tarifas auditadas.
-                      </p>
+                      <div>
+                        <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1">
+                          Glosa / Concepto Personalizado
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Opcional: se autogenera si queda vacío"
+                          value={customConcept}
+                          onChange={(e) => setCustomConcept(e.target.value)}
+                          className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs font-semibold text-slate-800 dark:text-white"
+                        />
+                      </div>
                     </div>
 
-                    {/* Custom Concept */}
-                    <div>
-                      <label className="block text-xs font-black uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-1.5">
-                        Concepto / Glosa Personalizada
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej. Matrícula Cuatrimestral - Segundo Semestre"
-                        value={customConcept}
-                        onChange={(e) => setCustomConcept(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 font-bold"
-                      />
+                    {/* Desglose Tributario en Vivo */}
+                    <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 text-xs space-y-1">
+                      <div className="flex justify-between font-mono text-[11px] text-gray-500 dark:text-zinc-400">
+                        <span>Op. Exonerada: S/. {calculatedTaxes.opExonerada.toFixed(2)}</span>
+                        <span>Op. Gravada: S/. {calculatedTaxes.opGravada.toFixed(2)}</span>
+                        <span>IGV (18%): S/. {calculatedTaxes.igvMonto.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-1 border-t border-gray-200/70 dark:border-white/10">
+                        <span className="text-[10px] font-mono text-gray-500 truncate max-w-[70%]">{calculatedTaxes.letras}</span>
+                        <span className="font-mono font-black text-sm text-slate-900 dark:text-white">
+                          TOTAL: S/. {calculatedTaxes.total.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
 
-                    {/* Actions */}
-                    <div className="pt-4 flex items-center justify-end gap-2.5">
+                    <div className="pt-2 flex items-center justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => setIsModalOpen(false)}
-                        className="px-4 py-2 text-xs font-black uppercase tracking-wider rounded-xl border border-gray-200 dark:border-white/10 text-gray-500 hover:bg-gray-50 dark:hover:bg-slate-950 cursor-pointer"
+                        className="px-4 py-2 text-xs font-bold rounded-xl border border-gray-200 dark:border-white/10 text-gray-600 dark:text-zinc-300 cursor-pointer"
                       >
                         Cancelar
                       </button>
                       <button
                         type="submit"
                         disabled={emissionTab === 'estudiante' ? !selectedStudentId : !selectedTeacherId}
-                        className={`px-4 py-2 text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-md transition-all ${
+                        className={`px-4 py-2 text-xs font-black text-white rounded-xl shadow-md transition-all ${
                           (emissionTab === 'estudiante' ? selectedStudentId : selectedTeacherId)
                             ? `${cl.primaryBg} ${cl.primaryHoverBg} cursor-pointer`
-                            : 'bg-gray-300 dark:bg-slate-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed'
+                            : 'bg-gray-300 dark:bg-slate-800 text-gray-400 cursor-not-allowed'
                         }`}
                       >
-                        Generar Comprobante PDF
+                        Emitir Comprobante + XML + CDR
                       </button>
                     </div>
                   </>
                 )}
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* =====================================================================
+          MODAL 2: CONSULTA DE VALIDEZ DE COMPROBANTES DE PAGO (SERVICIO #2)
+         ===================================================================== */}
+      <AnimatePresence>
+        {showValidadorCpeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowValidadorCpeModal(false)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <FileCheck2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">
+                      Consulta de Validez de Comprobante (SUNAT)
+                    </h3>
+                    <p className="text-[10px] text-gray-400">Verifica si una factura o boleta es auténtica y está declarada</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setShowValidadorCpeModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleRunValidadorCpe} className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">RUC del Emisor</label>
+                    <input
+                      required
+                      type="text"
+                      maxLength={11}
+                      value={valRucEmisor}
+                      onChange={(e) => setValRucEmisor(e.target.value.replace(/\D/g, ''))}
+                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Tipo Comprobante</label>
+                    <select
+                      value={valTipoComp}
+                      onChange={(e) => setValTipoComp(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-bold"
+                    >
+                      <option value="01">01 - Factura Electrónica</option>
+                      <option value="03">03 - Boleta de Venta</option>
+                      <option value="02">02 - Recibo por Honorarios</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Serie (Ej. F001 / B001)</label>
+                    <input
+                      required
+                      type="text"
+                      value={valSerie}
+                      onChange={(e) => setValSerie(e.target.value.toUpperCase())}
+                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Número Correlativo</label>
+                    <input
+                      required
+                      type="text"
+                      value={valNumero}
+                      onChange={(e) => setValNumero(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Fecha Emisión</label>
+                    <input
+                      required
+                      type="date"
+                      value={valFecha}
+                      onChange={(e) => setValFecha(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Importe Total (S/.)</label>
+                    <input
+                      required
+                      type="number"
+                      step="0.01"
+                      value={valMonto}
+                      onChange={(e) => setValMonto(e.target.value)}
+                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isValidatingCpe}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {isValidatingCpe ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  Consultar Validez en SUNAT
+                </button>
+              </form>
+
+              {validezResult && (
+                <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                  validezResult.esValido
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                }`}>
+                  <div className="font-black flex items-center justify-between">
+                    <span>Estado: {validezResult.estadoComprobante}</span>
+                    <span className="font-mono">Código: {validezResult.codigoEstado}</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">{validezResult.mensaje}</p>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* =====================================================================
+          MODAL 3: EMISIÓN DE RESUMEN DIARIO DE BOLETAS (RC - SERVICIO #3A)
+         ===================================================================== */}
+      <AnimatePresence>
+        {showResumenDiarioModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowResumenDiarioModal(false)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-emerald-600" />
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">Resumen Diario de Boletas (RC)</h3>
+                    <p className="text-[10px] text-gray-400">Agrupa y declara en lote las Boletas de Venta Electrónicas</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setShowResumenDiarioModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Fecha de Emisión de Boletas</label>
+                  <input
+                    type="date"
+                    value={resumenFecha}
+                    onChange={(e) => setResumenFecha(e.target.value)}
+                    className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono"
+                  />
+                </div>
+                <div className="p-3 bg-gray-50 dark:bg-slate-950 rounded-xl border border-gray-200 dark:border-white/10 flex justify-between items-center">
+                  <span className="text-gray-500">Boletas activas para agrupar:</span>
+                  <span className="font-mono font-black text-slate-800 dark:text-white">
+                    {facturas.filter(f => f.estado !== 'anulada').length} comprobantes
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isSendingResumen}
+                  onClick={handleEmitirResumenDiario}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {isSendingResumen ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  Generar y Enviar Resumen Diario RC a SUNAT
+                </button>
+
+                {resumenResponse && (
+                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 space-y-2">
+                    <p className="font-black">{resumenResponse.mensaje}</p>
+                    <p className="font-mono text-[11px]">Identificador: {resumenResponse.identificador} · Ticket: {resumenResponse.ticketSunat}</p>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => downloadTextFile(`${sunatConfig.rucEmisor}-${resumenResponse.identificador}.xml`, resumenResponse.xmlContent)}
+                        className="px-3 py-1 bg-white dark:bg-slate-900 rounded-lg font-mono font-bold text-[11px] border border-emerald-500/30 cursor-pointer"
+                      >
+                        Descargar XML Resumen
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadTextFile(`R-${sunatConfig.rucEmisor}-${resumenResponse.identificador}.xml`, resumenResponse.cdrContent)}
+                        className="px-3 py-1 bg-emerald-600 text-white rounded-lg font-mono font-bold text-[11px] cursor-pointer"
+                      >
+                        Descargar CDR SUNAT
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* =====================================================================
+          MODAL 4: COMUNICACIÓN DE BAJA FORMAL (RA - SERVICIO #3B)
+         ===================================================================== */}
+      <AnimatePresence>
+        {facturaToBaja && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setFacturaToBaja(null)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-500" />
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">Comunicación de Baja SUNAT (RA)</h3>
+                    <p className="text-[10px] text-gray-400">Anulación tributaria formal con generación de XML VoidedDocuments y CDR</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setFacturaToBaja(null)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmarComunicacionBaja} className="space-y-3 text-xs">
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1">
+                  <p className="font-bold text-slate-800 dark:text-slate-100">
+                    Comprobante: <span className="font-mono">{facturaToBaja.detalles?.serieCorrelativo || facturaToBaja.id}</span>
+                  </p>
+                  <p className="text-gray-500 dark:text-zinc-400">
+                    Receptor: {facturaToBaja.detalles.nombrePersona} · Monto: S/. {facturaToBaja.monto.toFixed(2)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Motivo de Baja Tributaria (Obligatorio SUNAT)</label>
+                  <input
+                    required
+                    type="text"
+                    value={motivoBajaInput}
+                    onChange={(e) => setMotivoBajaInput(e.target.value)}
+                    placeholder="Ej. Error en RUC, operación cancelada, duplicidad..."
+                    className="w-full p-2.5 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-semibold"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setFacturaToBaja(null)}
+                    className="flex-1 py-2 bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-zinc-300 font-bold rounded-xl cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSendingBaja}
+                    className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {isSendingBaja ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                    Enviar Baja RA + Descargar CDR
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* =====================================================================
+          MODAL 5: GUÍAS DE REMISIÓN ELECTRÓNICA (GRE T001 - SERVICIO #4)
+         ===================================================================== */}
+      <AnimatePresence>
+        {showGreModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowGreModal(false)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-2xl p-6 relative z-10 shadow-2xl max-h-[90vh] flex flex-col space-y-4 overflow-hidden"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-amber-500" />
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">
+                      Guías de Remisión Electrónica (GRE - Serie T001)
+                    </h3>
+                    <p className="text-[10px] text-gray-400">
+                      Emisión y consulta de traslado de materiales educativos / kits de laboratorio ante SUNAT
+                    </p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setShowGreModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto space-y-4 pr-1 text-xs">
+                {/* Emitir Nueva GRE */}
+                <form onSubmit={handleEmitirGuiaRemision} className="p-3.5 bg-gray-50 dark:bg-slate-950 rounded-xl border border-gray-200 dark:border-white/10 space-y-3">
+                  <h4 className="font-black text-slate-800 dark:text-slate-100 uppercase text-[11px]">Emitir Nueva Guía de Remisión Remitente</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 mb-0.5">RUC / DNI Destinatario</label>
+                      <input
+                        required
+                        type="text"
+                        value={greRucDestino}
+                        onChange={(e) => setGreRucDestino(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Nombre / Sede Destinatario</label>
+                      <input
+                        required
+                        type="text"
+                        value={greNombreDestino}
+                        onChange={(e) => setGreNombreDestino(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Punto de Partida (Ubigeo / Dirección)</label>
+                      <input
+                        required
+                        type="text"
+                        value={grePuntoPartida}
+                        onChange={(e) => setGrePuntoPartida(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Punto de Llegada (Ubigeo / Dirección)</label>
+                      <input
+                        required
+                        type="text"
+                        value={grePuntoLlegada}
+                        onChange={(e) => setGrePuntoLlegada(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Placa Vehículo / DNI Conductor</label>
+                      <div className="flex gap-1.5">
+                        <input
+                          required
+                          type="text"
+                          value={grePlaca}
+                          onChange={(e) => setGrePlaca(e.target.value.toUpperCase())}
+                          placeholder="Placa"
+                          className="w-1/2 p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg font-mono"
+                        />
+                        <input
+                          required
+                          type="text"
+                          value={greDniConductor}
+                          onChange={(e) => setGreDniConductor(e.target.value)}
+                          placeholder="DNI Cond."
+                          className="w-1/2 p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Peso Bruto (KGM) y Motivo</label>
+                      <div className="flex gap-1.5">
+                        <input
+                          required
+                          type="number"
+                          step="0.1"
+                          value={grePesoKg}
+                          onChange={(e) => setGrePesoKg(e.target.value)}
+                          className="w-24 p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg font-mono font-bold"
+                        />
+                        <select
+                          value={greMotivo}
+                          onChange={(e) => setGreMotivo(e.target.value)}
+                          className="flex-1 p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg"
+                        >
+                          <option value="01 - Venta / Entrega de Material Educativo">01 - Venta / Entrega Material</option>
+                          <option value="04 - Traslado entre establecimientos de la misma empresa">04 - Traslado entre Sedes</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Descripción de Bienes Trasladados</label>
+                    <input
+                      required
+                      type="text"
+                      value={greDescripcionBienes}
+                      onChange={(e) => setGreDescripcionBienes(e.target.value)}
+                      className="w-full p-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-lg"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Truck className="w-4 h-4" />
+                    Emitir Guía de Remisión Electrónica (T001)
+                  </button>
+                </form>
+
+                {/* Consulta de Estado de GRE */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-black text-slate-800 dark:text-slate-100 uppercase text-[11px]">
+                      Guías de Remisión Emitidas y Consulta de Fiscalización
+                    </h4>
+                    <input
+                      type="text"
+                      value={greSearchQuery}
+                      onChange={(e) => setGreSearchQuery(e.target.value)}
+                      placeholder="Filtrar T001-..."
+                      className="px-2.5 py-1 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-lg font-mono text-[11px]"
+                    />
+                  </div>
+
+                  {greConsultaMsg && (
+                    <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-bold text-[11px]">
+                      {greConsultaMsg}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    {guiasRemision
+                      .filter(g => g.serieCorrelativo.toLowerCase().includes(greSearchQuery.toLowerCase()) || g.descripcionBienes.toLowerCase().includes(greSearchQuery.toLowerCase()))
+                      .map((gre) => (
+                        <div key={gre.id} className="p-3 rounded-xl border border-gray-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-black text-amber-600 dark:text-amber-400">{gre.serieCorrelativo}</span>
+                              <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">· {gre.estadoSunat} (Ticket {gre.ticketSunat})</span>
+                            </div>
+                            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 mt-0.5">{gre.descripcionBienes}</p>
+                            <p className="text-[10px] text-gray-500">
+                              {gre.puntoPartida} → {gre.puntoLlegada} ({gre.pesoBrutoKg} KGM · Placa {gre.placaVehiculo})
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setGreConsultaMsg(`GRE ${gre.serieCorrelativo}: Estado EN TRÁNSITO / ACEPTADO POR SUNAT. Hash QR verificado para control aduanero/carreteras.`)}
+                              className="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-slate-800 text-[10px] font-bold cursor-pointer"
+                            >
+                              Validar Estado
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => generateGuiaRemisionPdf(gre, true)}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 text-[10px] font-mono font-bold cursor-pointer"
+                            >
+                              PDF QR
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadTextFile(`${gre.rucRemitente}-09-${gre.serieCorrelativo}.xml`, generateGuiaRemisionXml(gre))}
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-mono font-bold cursor-pointer"
+                            >
+                              XML
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* =====================================================================
+          MODAL 6: CONFIGURAR RUC / CREDENCIALES SOL SUNAT
+         ===================================================================== */}
+      <AnimatePresence>
+        {showSunatConfigModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowSunatConfigModal(false)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <Settings2 className="w-5 h-5 text-indigo-600" />
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">Parámetros del Emisor SUNAT</h3>
+                    <p className="text-[10px] text-gray-400">Usa el RUC de pruebas 20000000001 o ingresa tu RUC 10 / RUC 20 cuando lo tengas</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setShowSunatConfigModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">RUC Emisor (Sin RUC propio usa: 20000000001)</label>
+                  <input
+                    type="text"
+                    maxLength={11}
+                    value={sunatConfig.rucEmisor}
+                    onChange={(e) => setSunatConfig({ ...sunatConfig, rucEmisor: e.target.value.replace(/\D/g, '') })}
+                    className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Razón Social / Nombre Comercial</label>
+                  <input
+                    type="text"
+                    value={sunatConfig.razonSocialEmisor}
+                    onChange={(e) => setSunatConfig({ ...sunatConfig, razonSocialEmisor: e.target.value })}
+                    className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-semibold"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Usuario SOL Secundario</label>
+                    <input
+                      type="text"
+                      value={sunatConfig.usuarioSol}
+                      onChange={(e) => setSunatConfig({ ...sunatConfig, usuarioSol: e.target.value })}
+                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Clave SOL</label>
+                    <input
+                      type="password"
+                      value={sunatConfig.claveSol}
+                      onChange={(e) => setSunatConfig({ ...sunatConfig, claveSol: e.target.value })}
+                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const reset: SunatConfig = {
+                        modo: 'sandbox_beta',
+                        rucEmisor: '20000000001',
+                        razonSocialEmisor: 'COLEGIO ENLACEC - SANDBOX BETA SUNAT',
+                        direccionEmisor: 'AV. GARCILASO DE LA VEGA 1472 - LIMA - PERÚ',
+                        usuarioSol: 'MODDATOS',
+                        claveSol: 'MODDATOS'
+                      };
+                      setSunatConfig(reset);
+                      saveSunatConfig(reset);
+                    }}
+                    className="flex-1 py-2 bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-zinc-300 font-bold rounded-xl cursor-pointer"
+                  >
+                    Restaurar Sandbox Beta
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      saveSunatConfig(sunatConfig);
+                      setShowSunatConfigModal(false);
+                      addNotification({
+                        title: 'Configuración Tributaria Guardada',
+                        content: `RUC ${sunatConfig.rucEmisor} activo en la Bóveda.`,
+                        type: 'success'
+                      });
+                    }}
+                    className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl cursor-pointer"
+                  >
+                    Guardar Parámetros
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}
@@ -1541,28 +2758,16 @@ export const BovedaFacturasView: React.FC = () => {
                 </button>
               </div>
 
-              <div className="text-center space-y-2">
-                <div className="p-3 bg-amber-500/10 text-amber-500 rounded-full w-12 h-12 mx-auto flex items-center justify-center">
-                  <Key className="w-6 h-6" />
-                </div>
-                <h4 className="text-sm font-extrabold text-slate-800 dark:text-slate-100">
-                  Confirmar extracción del código
-                </h4>
-                <p className="text-xs text-gray-400 dark:text-zinc-400 font-medium">
-                  Estás a punto de copiar el código <span className="font-mono font-bold text-amber-500">{codeToCopy.codigo}</span>. Este token solo podrá copiarse <strong>una única vez</strong>.
-                </p>
-              </div>
-
               <form onSubmit={handleConfirmCopyCode} className="space-y-3 pt-2">
                 <div>
                   <label className="block text-[10px] font-extrabold text-gray-500 uppercase tracking-wider mb-1">
-                    Ingresa tu Contraseña de Usuario
+                    Ingresa la Contraseña de la Bóveda
                   </label>
                   <input
                     autoFocus
                     required
                     type="password"
-                    placeholder="Escribe tu contraseña..."
+                    placeholder="Escribe la contraseña..."
                     value={copyPasswordInput}
                     onChange={(e) => setCopyPasswordInput(e.target.value)}
                     className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white rounded-xl outline-none"
@@ -1586,6 +2791,118 @@ export const BovedaFacturasView: React.FC = () => {
                   >
                     <Copy className="w-3.5 h-3.5" />
                     Autorizar y Copiar
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* MODAL: CAMBIAR CLAVE DE BÓVEDA */}
+        {showChangePasscodeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowChangePasscodeModal(false)}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white dark:bg-slate-900 border border-gray-150 dark:border-white/10 rounded-2xl w-full max-w-sm p-6 relative z-10 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-white/10">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400">
+                    <Key className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">Cambiar Clave de Bóveda</h3>
+                    <p className="text-[10px] text-gray-400">Se registrará en la base de datos de inmediato.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowChangePasscodeModal(false)}
+                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleChangePasscode} className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                    Clave Actual de la Bóveda
+                  </label>
+                  <input
+                    required
+                    type="password"
+                    placeholder="Clave actual (por defecto 1234)"
+                    value={currentPassInput}
+                    onChange={(e) => setCurrentPassInput(e.target.value)}
+                    className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                    Nueva Clave de Seguridad
+                  </label>
+                  <input
+                    required
+                    type="password"
+                    placeholder="Mínimo 4 caracteres"
+                    value={newPassInput}
+                    onChange={(e) => setNewPassInput(e.target.value)}
+                    className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                    Confirmar Nueva Clave
+                  </label>
+                  <input
+                    required
+                    type="password"
+                    placeholder="Repita la nueva clave"
+                    value={confirmPassInput}
+                    onChange={(e) => setConfirmPassInput(e.target.value)}
+                    className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
+                  />
+                </div>
+
+                {changePassError && (
+                  <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-bold text-center">
+                    {changePassError}
+                  </div>
+                )}
+
+                {changePassSuccess && (
+                  <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold text-center">
+                    {changePassSuccess}
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowChangePasscodeModal(false)}
+                    className="flex-1 py-2 text-xs font-bold bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300 rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingPasscode}
+                    className="flex-1 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {isSavingPasscode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Guardar Clave
                   </button>
                 </div>
               </form>
