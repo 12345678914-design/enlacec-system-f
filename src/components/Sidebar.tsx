@@ -90,7 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, activeTab, on
         { id: 'asistencias', label: 'Mis Asistencias', icon: CalendarCheck },
         { id: 'notas', label: 'Notas', icon: FileText },
         { id: 'finanzas', label: 'Finanzas', icon: Wallet },
-        { id: 'facturas', label: 'Bóveda Facturas', icon: Receipt },
+        { id: 'facturas', label: 'Mis Facturas', icon: Receipt },
         { id: 'recursos', label: 'Recursos', icon: FolderOpen },
         { id: 'avisos', label: 'Avisos y Noticias', icon: Megaphone },
         { id: 'configuracion', label: 'Configuración', icon: Settings },

@@ -513,7 +513,7 @@ const INITIAL_NEWS: SchoolNews[] = [
 const INITIAL_FACTURAS: Factura[] = [
   {
     id: 'FAC-EST-9348',
-    created_at: '2026-07-05T10:00:00.000Z',
+    created_at: new Date().toISOString(),
     tipo: 'estudiante',
     student_id: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb01',
     monto: 150.00,
@@ -523,22 +523,33 @@ const INITIAL_FACTURAS: Factura[] = [
       nombrePersona: 'Sofía Valentino',
       dniEstudiante: '72345678',
       nombreServicio: 'Matrícula Regular de Secundaria',
-      cursosVinculados: ['Álgebra Avanzada', 'Física Elemental', 'Geometría Plana']
+      cursosVinculados: ['Álgebra Avanzada', 'Física Elemental', 'Geometría Plana'],
+      serieCorrelativo: 'B001-000001',
+      tipoComprobanteCodigo: '03',
+      tipoComprobanteNombre: 'BOLETA DE VENTA ELECTRONICA',
+      rucEmisor: '20000000001',
+      estadoSunat: 'ACEPTADO'
     }
   },
   {
     id: 'FAC-DOC-7123',
-    created_at: '2026-07-10T14:30:00.000Z',
+    created_at: new Date().toISOString(),
     tipo: 'profesor',
     teacher_id: 'f83d91bb-5991-49e0-811c-dcd2f3c8a001',
     monto: 300.00,
-    concepto: 'Boleta de Honorarios - Carlos Fuentes (Julio 2026)',
+    concepto: 'Recibo por Honorarios Electrónico - Asistencias Aprobadas (Prof. Carlos Fuentes)',
     estado: 'emitida',
     detalles: {
       nombrePersona: 'Prof. Carlos Fuentes',
-      dniDocente: 'DNI72345678',
+      dniDocente: '72345678',
       clasesDictadas: 4,
-      tarifaPorClase: 75.00
+      tarifaPorClase: 75.00,
+      serieCorrelativo: 'E001-000001',
+      tipoComprobanteCodigo: '02',
+      tipoComprobanteNombre: 'RECIBO POR HONORARIOS ELECTRONICO',
+      rucEmisor: '20000000001',
+      afectacionIgv: 'inafecto_rhe',
+      estadoSunat: 'ACEPTADO'
     }
   }
 ];
@@ -546,11 +557,16 @@ const INITIAL_FACTURAS: Factura[] = [
 const INITIAL_ATTENDANCE: AttendanceRecord[] = [
   {
     id: 'ATT-001',
-    teacherId: 'DOC-001',
+    teacherId: 'f83d91bb-5991-49e0-811c-dcd2f3c8a001',
     teacherName: 'Prof. Carlos Fuentes',
-    course: '10° Grado A',
-    date: '2026-06-15',
+    course: 'Álgebra Lineal - 10° Grado A',
+    date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-15`,
     time: '08:15',
+    inicio: '08:00',
+    fin: '10:00',
+    cantidadSesiones: 1,
+    monto: 150.00,
+    estado: null,
     students: [
       { studentId: 'EST-001', studentName: 'Sofía Valentino', present: true },
       { studentId: 'EST-003', studentName: 'Camila Rojas', present: true },
@@ -560,11 +576,16 @@ const INITIAL_ATTENDANCE: AttendanceRecord[] = [
   },
   {
     id: 'ATT-002',
-    teacherId: 'DOC-002',
+    teacherId: '7ea4e1a7-ccfa-44cb-b391-7db9dfefc102',
     teacherName: 'Dra. Ana Cecilia',
-    course: '10° Grado A',
-    date: '2026-06-12',
+    course: 'Química Experimental - 10° Grado A',
+    date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-12`,
     time: '10:30',
+    inicio: '10:00',
+    fin: '12:00',
+    cantidadSesiones: 1,
+    monto: 160.00,
+    estado: null,
     students: [
       { studentId: 'EST-001', studentName: 'Sofía Valentino', present: true },
       { studentId: 'EST-003', studentName: 'Camila Rojas', present: false },
@@ -574,11 +595,16 @@ const INITIAL_ATTENDANCE: AttendanceRecord[] = [
   },
   {
     id: 'ATT-003',
-    teacherId: 'DOC-003',
+    teacherId: 'c90a2be7-5c56-4b82-bc18-ee51ffaf3103',
     teacherName: 'Lic. Fernando Paz',
-    course: '10° Grado A',
-    date: '2026-06-10',
+    course: 'Historia Universal - 10° Grado A',
+    date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-10`,
     time: '09:00',
+    inicio: '09:00',
+    fin: '11:00',
+    cantidadSesiones: 1,
+    monto: 140.00,
+    estado: null,
     students: [
       { studentId: 'EST-001', studentName: 'Sofía Valentino', present: true },
       { studentId: 'EST-003', studentName: 'Camila Rojas', present: true },
@@ -588,25 +614,35 @@ const INITIAL_ATTENDANCE: AttendanceRecord[] = [
   },
   {
     id: 'ATT-004',
-    teacherId: 'DOC-001',
+    teacherId: 'f83d91bb-5991-49e0-811c-dcd2f3c8a001',
     teacherName: 'Prof. Carlos Fuentes',
-    course: '10° Grado A',
-    date: '2026-06-08',
+    course: 'Trigonometría y Geometría - 10° Grado A',
+    date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-08`,
     time: '08:15',
+    inicio: '08:00',
+    fin: '12:00',
+    cantidadSesiones: 2,
+    monto: 300.00,
+    estado: true,
     students: [
       { studentId: 'EST-001', studentName: 'Sofía Valentino', present: true },
       { studentId: 'EST-003', studentName: 'Camila Rojas', present: true },
       { studentId: 'EST-005', studentName: 'Valentina Díaz', present: false }
     ],
-    comments: 'Ecuaciones de segundo grado.'
+    comments: 'Ecuaciones de segundo grado y resolución de problemas.'
   },
   {
     id: 'ATT-005',
-    teacherId: 'DOC-002',
+    teacherId: '7ea4e1a7-ccfa-44cb-b391-7db9dfefc102',
     teacherName: 'Dra. Ana Cecilia',
-    course: '10° Grado A',
-    date: '2026-06-05',
+    course: 'Biología Celular - 10° Grado A',
+    date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-05`,
     time: '10:30',
+    inicio: '10:00',
+    fin: '12:00',
+    cantidadSesiones: 1,
+    monto: 160.00,
+    estado: null,
     students: [
       { studentId: 'EST-001', studentName: 'Sofía Valentino', present: true },
       { studentId: 'EST-003', studentName: 'Camila Rojas', present: true },
@@ -616,70 +652,22 @@ const INITIAL_ATTENDANCE: AttendanceRecord[] = [
   },
   {
     id: 'ATT-006',
-    teacherId: 'DOC-003',
-    teacherName: 'Lic. Fernando Paz',
-    course: '10° Grado A',
-    date: '2026-06-03',
+    teacherId: 'f83d91bb-5991-49e0-811c-dcd2f3c8a001',
+    teacherName: 'Prof. Carlos Fuentes',
+    course: 'Cálculo Diferencial - 11° Grado B',
+    date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-03`,
     time: '09:00',
+    inicio: '09:00',
+    fin: '11:00',
+    cantidadSesiones: 1,
+    monto: 150.00,
+    estado: null,
     students: [
       { studentId: 'EST-001', studentName: 'Sofía Valentino', present: false },
       { studentId: 'EST-003', studentName: 'Camila Rojas', present: true },
       { studentId: 'EST-005', studentName: 'Valentina Díaz', present: true }
     ],
     comments: 'Sofía Valentino llegó tarde con justificación firmada por su apoderado.'
-  },
-  {
-    id: 'ATT-007',
-    teacherId: 'DOC-001',
-    teacherName: 'Prof. Carlos Fuentes',
-    course: '10° Grado A',
-    date: '2026-06-01',
-    time: '08:15',
-    students: [
-      { studentId: 'EST-001', studentName: 'Sofía Valentino', present: true },
-      { studentId: 'EST-003', studentName: 'Camila Rojas', present: true },
-      { studentId: 'EST-005', studentName: 'Valentina Díaz', present: true }
-    ],
-    comments: 'Inicio de la unidad didáctica de funciones trigonométricas.'
-  },
-  {
-    id: 'ATT-008',
-    teacherId: 'DOC-001',
-    teacherName: 'Prof. Carlos Fuentes',
-    course: '11° Grado B',
-    date: '2026-06-12',
-    time: '11:45',
-    students: [
-      { studentId: 'EST-002', studentName: 'Mateo Quispe', present: true },
-      { studentId: 'EST-004', studentName: 'Lucas Mendoza', present: true }
-    ],
-    comments: 'Álgebra avanzada, límites matemáticos.'
-  },
-  {
-    id: 'ATT-009',
-    teacherId: 'DOC-002',
-    teacherName: 'Dra. Ana Cecilia',
-    course: '11° Grado B',
-    date: '2026-06-09',
-    time: '13:00',
-    students: [
-      { studentId: 'EST-002', studentName: 'Mateo Quispe', present: false },
-      { studentId: 'EST-004', studentName: 'Lucas Mendoza', present: true }
-    ],
-    comments: 'Física cuántica elemental. Mateo Quispe con falta injustificada.'
-  },
-  {
-    id: 'ATT-010',
-    teacherId: 'DOC-003',
-    teacherName: 'Lic. Fernando Paz',
-    course: '11° Grado B',
-    date: '2026-06-05',
-    time: '11:45',
-    students: [
-      { studentId: 'EST-002', studentName: 'Mateo Quispe', present: true },
-      { studentId: 'EST-004', studentName: 'Lucas Mendoza', present: false }
-    ],
-    comments: 'Análisis crítico sobre la caída de Constantinopla. Lucas Mendoza ausente.'
   }
 ];
 
@@ -1018,7 +1006,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
     const saved = localStorage.getItem('edu_attendance');
-    return saved ? JSON.parse(saved) : INITIAL_ATTENDANCE;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((att: any) => {
+            const sesiones = Number(att.cantidadSesiones) || 1;
+            const resolvedMonto = Number(att.monto) > 0 ? Number(att.monto) : sesiones * 150;
+            const resolvedTeacherId =
+              att.teacherId === 'DOC-001'
+                ? 'f83d91bb-5991-49e0-811c-dcd2f3c8a001'
+                : att.teacherId === 'DOC-002'
+                ? '7ea4e1a7-ccfa-44cb-b391-7db9dfefc102'
+                : att.teacherId === 'DOC-003'
+                ? 'c90a2be7-5c56-4b82-bc18-ee51ffaf3103'
+                : att.teacherId;
+            return {
+              ...att,
+              teacherId: resolvedTeacherId,
+              cantidadSesiones: sesiones,
+              monto: resolvedMonto
+            };
+          });
+        }
+      } catch {
+        // Fallback to INITIAL_ATTENDANCE
+      }
+    }
+    return INITIAL_ATTENDANCE;
   });
 
   const [news, setNews] = useState<SchoolNews[]>(() => {
@@ -1042,7 +1057,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [facturas, setFacturas] = useState<Factura[]>(() => {
     const saved = localStorage.getItem('edu_facturas');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {
+        // Fallback
+      }
+    }
+    return INITIAL_FACTURAS;
   });
 
   const [vaultPasscode, setVaultPasscodeState] = useState<string>(() => {
@@ -1782,11 +1805,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           detalles: typeof item.detalles === 'string' ? JSON.parse(item.detalles) : (item.detalles || {}),
           created_at: item.created_at
         }));
-        setFacturas(mappedFacturas);
-        localStorage.setItem('edu_facturas', JSON.stringify(mappedFacturas));
+        const finalFacturas = mappedFacturas.length > 0 ? mappedFacturas : INITIAL_FACTURAS;
+        setFacturas(finalFacturas);
+        localStorage.setItem('edu_facturas', JSON.stringify(finalFacturas));
         facturasLoadedFromSupabase = true;
         hasAnySupabaseSuccess = true;
-        console.log("✅ [SISTEMA-LOG] Tabla 'facturas' cargada exitosamente de Supabase. Registros:", data.length);
+        console.log("✅ [SISTEMA-LOG] Tabla 'facturas' cargada exitosamente de Supabase. Registros:", finalFacturas.length);
       }
     } catch (err) {
       console.warn("⚠️ [SISTEMA-LOG] 'facturas' no accesible:", err);
@@ -1794,7 +1818,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (!facturasLoadedFromSupabase) {
       const saved = localStorage.getItem('edu_facturas');
-      const loadedData = saved ? JSON.parse(saved) : [];
+      let loadedData: Factura[] = INITIAL_FACTURAS;
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) loadedData = parsed;
+        } catch {
+          // Fallback to INITIAL_FACTURAS
+        }
+      }
       setFacturas(loadedData);
       console.log("ℹ️ [SISTEMA-LOG] Facturas cargadas de Almacenamiento Local (offline fallback). Registros:", loadedData.length);
     }
@@ -2966,46 +2998,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error("Exception updating attendance status in Supabase:", e);
     }
 
-    // 4. SOLO CUANDO ACEPTA REGISTRA A LAS FACTURAS COMO PAGO DOCENTE, SOLO SI ACEPTA
+    // 4. SOLO CUANDO ACEPTA REGISTRA A LAS FACTURAS COMO PAGO DOCENTE (SISTEMA + PERSONAL DEL PROFESOR)
     if (approved && targetAttRecord) {
       const attRecord = targetAttRecord;
-      const prof = teachers.find(t => t.id === attRecord.teacherId || t.name === attRecord.teacherName);
+      const prof = teachers.find(
+        t =>
+          t.id === attRecord.teacherId ||
+          t.codigo === attRecord.teacherId ||
+          t.name?.toLowerCase() === (attRecord.teacherName || '').toLowerCase() ||
+          `${t.nombre || ''} ${t.apellido || ''}`.trim().toLowerCase() ===
+            (attRecord.teacherName || '').replace(/^Prof\.\s*|^Dra\.\s*|^Lic\.\s*/i, '').trim().toLowerCase()
+      );
+      const resolvedTeacherId = prof ? prof.id : attRecord.teacherId;
       const profName = prof ? prof.name : (attRecord.teacherName || 'Docente');
       const courseName = attRecord.course || 'Clase General';
-      const cantidadSesiones = attRecord.cantidadSesiones || 1;
-      const amount = attRecord.monto || 0;
+      const cantidadSesiones = Number(attRecord.cantidadSesiones) || 1;
+      const amount = Number(attRecord.monto) > 0 ? Number(attRecord.monto) : cantidadSesiones * 150;
 
-      try {
-        console.log("🔒 [SISTEMA-ASISTENCIA] Creando boleta de honorarios en la bóveda de facturas y subiendo a Cloudinary...");
-        let pdfUrl: string | undefined = undefined;
-        if (prof) {
-          const teacherRecords = attendance.filter(r => r.teacherId === prof.id);
-          const pdfRes = generateTeacherBoleta(prof, teacherRecords, false, {
-            amount,
-            concepto: `Recibo de Honorarios - ${profName} - ${courseName} (${attRecord.date})`,
-            paymentStatus: 'PAGADO'
-          });
-          const uploadRes = await uploadToCloudinaryClient(pdfRes.base64, `${pdfRes.id}.pdf`);
-          pdfUrl = uploadRes?.url || pdfRes.base64;
-        }
+      // Avoid creating duplicate invoice if this sessionId was already invoiced
+      const alreadyInvoiced = facturas.some(
+        f =>
+          f.detalles?.idSesionAsistencia === String(sessionId) ||
+          (f.tipo === 'profesor' &&
+            f.teacher_id === resolvedTeacherId &&
+            f.concepto.includes(`(${attRecord.date})`) &&
+            f.concepto.includes(courseName))
+      );
 
-        await addFactura({
-          tipo: 'profesor',
-          teacher_id: attRecord.teacherId,
-          monto: amount,
-          estado: 'emitida',
-          concepto: `Recibo de Honorarios - ${profName} - ${courseName} (${attRecord.date})`,
-          pdf_url: pdfUrl,
-          detalles: {
-            nombrePersona: profName,
-            dniDocente: prof?.dni || 'No registrado',
-            clasesDictadas: cantidadSesiones,
-            tarifaPorClase: prof ? Number(prof.salary) : 0
+      if (!alreadyInvoiced) {
+        try {
+          console.log("🔒 [SISTEMA-ASISTENCIA] Creando recibo por honorarios en las facturas del sistema y del profesor...");
+          let pdfUrl: string | undefined = undefined;
+          if (prof) {
+            const teacherRecords = attendance.filter(r => r.teacherId === prof.id || r.teacherName === prof.name);
+            const pdfRes = generateTeacherBoleta(prof, teacherRecords, false, {
+              amount,
+              concepto: `Recibo de Honorarios - ${profName} - ${courseName} (${attRecord.date})`,
+              paymentStatus: 'PAGADO'
+            });
+            const uploadRes = await uploadToCloudinaryClient(pdfRes.base64, `${pdfRes.id}.pdf`);
+            pdfUrl = uploadRes?.url || pdfRes.base64;
           }
-        });
-      } catch (err) {
-        console.error("Error creating payment factura for accepted attendance:", err);
+
+          const nextCorr = String(facturas.filter(f => f.tipo === 'profesor').length + 1).padStart(6, '0');
+          const serieCorr = `E001-${nextCorr}`;
+
+          await addFactura({
+            tipo: 'profesor',
+            teacher_id: resolvedTeacherId,
+            monto: amount,
+            estado: 'emitida',
+            concepto: `Recibo por Honorarios - Asistencia Aprobada: ${profName} - ${courseName} (${attRecord.date})`,
+            pdf_url: pdfUrl,
+            detalles: {
+              idSesionAsistencia: String(sessionId),
+              nombrePersona: profName,
+              dniDocente: prof?.dni || '00000000',
+              clasesDictadas: cantidadSesiones,
+              tarifaPorClase: cantidadSesiones > 0 ? +(amount / cantidadSesiones).toFixed(2) : (prof ? Number(prof.salary) : 150),
+              serieCorrelativo: serieCorr,
+              tipoComprobanteCodigo: '02',
+              tipoComprobanteNombre: 'RECIBO POR HONORARIOS ELECTRONICO',
+              rucEmisor: '20000000001',
+              razonSocialEmisor: 'COLEGIO ENLACEC - SANDBOX BETA SUNAT',
+              afectacionIgv: 'inafecto_rhe',
+              estadoSunat: 'ACEPTADO',
+              codigoRespuestaSunat: '0',
+              mensajeSunat: `Factura/RHE ${serieCorr} generada al aprobar asistencia en Administración.`
+            }
+          });
+
+          addNotification({
+            title: `Asistencia Aprobada y Facturada (${serieCorr})`,
+            content: `Se aprobó la asistencia de ${profName} (${courseName}) por S/. ${amount.toFixed(2)} y se agregó a las facturas del sistema y del profesor.`,
+            type: 'success'
+          });
+        } catch (err) {
+          console.error("Error creating payment factura for accepted attendance:", err);
+        }
       }
+    } else if (!approved && targetAttRecord) {
+      addNotification({
+        title: 'Asistencia Rechazada',
+        content: `La sesión de asistencia de ${targetAttRecord.teacherName || 'Docente'} (${targetAttRecord.course}) fue marcada como rechazada.`,
+        type: 'warning'
+      });
     }
   };
 

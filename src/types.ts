@@ -243,6 +243,7 @@ export interface Factura {
     ticketSunat?: string;
     motivoBaja?: string;
     fechaBaja?: string;
+    idSesionAsistencia?: string;
   };
 }
 

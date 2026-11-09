@@ -202,6 +202,7 @@ function AppContent() {
       pizarra: 'Laboratorio Científico de IA',
       'tesla-ai': 'TESLA AI - Asistente Humano de IA',
       finanzas: currentUser.role === 'admin' ? 'Caja / Flujo de Efectivo' : 'Tus Honorarios y Pagos',
+      facturas: currentUser.role === 'admin' ? 'Bóveda de Facturas (Administración)' : 'Mis Facturas por Asistencias Aprobadas',
       configuracion: 'Ajustes del Sistema',
       asistencias: 'Asistencias del Docente',
       notas: 'Gestión de Notas de Estudiantes',

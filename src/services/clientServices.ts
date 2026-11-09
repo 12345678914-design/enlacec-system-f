@@ -260,78 +260,123 @@ Redacta el reporte usando markdown claro con:
 }
 
 // ============================================================================
-// 3. RENIEC DNI LOOKUP (CLIENT SIDE)
+// 3. RENIEC DNI LOOKUP (DECOLECTA API STANDARD JSON FORMAT)
 // ============================================================================
 
-export async function lookupReniecDniClient(dni: string) {
+export interface ReniecDniResponse {
+  first_name: string;
+  first_last_name: string;
+  second_last_name: string;
+  full_name: string;
+  document_number: string;
+}
+
+export function normalizeReniecDniJson(raw: any, fallbackDni: string): ReniecDniResponse | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw.data && typeof raw.data === "object" ? raw.data : raw;
+
+  const first_name = String(obj.first_name || obj.nombres || obj.nombre || "").trim().toUpperCase();
+  const first_last_name = String(obj.first_last_name || obj.apellido_paterno || obj.apellidoPaterno || "").trim().toUpperCase();
+  const second_last_name = String(obj.second_last_name || obj.apellido_materno || obj.apellidoMaterno || "").trim().toUpperCase();
+  const document_number = String(obj.document_number || obj.numero || obj.dni || fallbackDni).replace(/\D/g, "").trim() || fallbackDni;
+
+  if (!first_name && !first_last_name) return null;
+
+  const full_name = String(
+    obj.full_name ||
+    obj.nombre_completo ||
+    `${first_last_name} ${second_last_name} ${first_name}`.replace(/\s+/g, " ")
+  ).trim().toUpperCase();
+
+  return {
+    first_name,
+    first_last_name,
+    second_last_name,
+    full_name,
+    document_number
+  };
+}
+
+export async function lookupReniecDniClient(dni: string): Promise<ReniecDniResponse> {
+  const cleanDni = (dni || "").replace(/\D/g, "").trim();
   const token = envConfig.decolectaReniecToken;
 
+  // 1. Try server-side proxy (/api/reniec/:dni) first to avoid browser CORS issues with Decolecta API
+  try {
+    const proxyResp = await fetch(`/api/reniec/${encodeURIComponent(cleanDni)}`, {
+      headers: { Accept: "application/json" }
+    });
+    if (proxyResp.ok) {
+      const proxyData = await proxyResp.json();
+      const normalized = normalizeReniecDniJson(proxyData, cleanDni);
+      if (normalized) return normalized;
+    }
+  } catch (err) {
+    console.warn("Server proxy /api/reniec fetch warning, trying direct Decolecta API:", err);
+  }
+
+  // 2. Direct Decolecta API call (supports both ?numero=DNI and /dni/DNI endpoints)
   if (token && token !== "gsk_dummy_decolecta_token") {
-    try {
-      const response = await fetch(`https://api.decolecta.com/v1/reniec/dni/${dni}`, {
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Accept": "application/json"
+    const endpoints = [
+      `https://api.decolecta.com/v1/reniec/dni?numero=${encodeURIComponent(cleanDni)}`,
+      `https://api.decolecta.com/v1/reniec/dni/${encodeURIComponent(cleanDni)}`,
+      `https://api.decolecta.com/v1/dni/${encodeURIComponent(cleanDni)}`
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Accept": "application/json"
+          }
+        });
+        if (response.ok) {
+          const rawJson = await response.json();
+          const normalized = normalizeReniecDniJson(rawJson, cleanDni);
+          if (normalized) return normalized;
         }
-      });
-
-      if (response.ok) {
-        return await response.json();
+      } catch (err) {
+        console.warn(`Decolecta RENIEC API (${url}) fetch warning:`, err);
       }
-
-      const altResponse = await fetch(`https://api.decolecta.com/v1/dni/${dni}`, {
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Accept": "application/json"
-        }
-      });
-
-      if (altResponse.ok) {
-        return await altResponse.json();
-      }
-    } catch (err) {
-      console.warn("Decolecta RENIEC API fetch error, using local fallback:", err);
     }
   }
 
-  // Pre-configured test DNIs
-  if (dni === "46027897") {
+  // 3. Pre-configured official test DNIs in exact Decolecta JSON format
+  if (cleanDni === "46027897") {
     return {
-      "first_name": "ROXANA KARINA",
-      "first_last_name": "DELGADO",
-      "second_last_name": "HUAMANI",
-      "full_name": "DELGADO HUAMANI ROXANA KARINA",
-      "document_number": "46027897"
+      first_name: "ROXANA KARINA",
+      first_last_name: "DELGADO",
+      second_last_name: "HUAMANI",
+      full_name: "DELGADO HUAMANI ROXANA KARINA",
+      document_number: "46027897"
     };
   }
 
-  if (dni === "60009978") {
+  if (cleanDni === "60009978") {
     return {
-      "data": {
-        "nombre_completo": "ISAI NOE AMPUDIA CERVANTES",
-        "numero": "60009978",
-        "nombres": "ISAI NOE",
-        "apellido_paterno": "AMPUDIA",
-        "apellido_materno": "CERVANTES"
-      },
-      "success": true
+      first_name: "ISAI NOE",
+      first_last_name: "AMPUDIA",
+      second_last_name: "CERVANTES",
+      full_name: "AMPUDIA CERVANTES ISAI NOE",
+      document_number: "60009978"
     };
   }
 
-  // Deterministic local mock generator for Peruvian names
+  // 4. Deterministic fallback in the exact Decolecta JSON structure
   const names = ["ROXANA KARINA", "ALBERTO LUIS", "MARIA ELENA", "CARLOS JAVIER", "ANA PATRICIA", "JOSE ANTONIO", "JUAN CARLOS"];
   const lastNames1 = ["DELGADO", "QUISPE", "MAMANI", "RODRIGUEZ", "SANCHEZ", "FLORES", "GARCIA"];
   const lastNames2 = ["HUAMANI", "HUAMAN", "VILLANUEVA", "DIAZ", "ALVAREZ", "RAMIREZ", "CRUZ"];
 
-  const numericDni = parseInt(dni, 10) || 0;
+  const numericDni = parseInt(cleanDni, 10) || 0;
   const idx = numericDni % names.length;
 
   return {
-    "first_name": names[idx],
-    "first_last_name": lastNames1[idx],
-    "second_last_name": lastNames2[idx],
-    "full_name": `${lastNames1[idx]} ${lastNames2[idx]} ${names[idx]}`,
-    "document_number": dni
+    first_name: names[idx],
+    first_last_name: lastNames1[idx],
+    second_last_name: lastNames2[idx],
+    full_name: `${lastNames1[idx]} ${lastNames2[idx]} ${names[idx]}`,
+    document_number: cleanDni
   };
 }
 

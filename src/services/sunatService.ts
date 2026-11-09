@@ -1,4 +1,37 @@
 import { Factura } from '../types';
+import {
+  consultarRucDni,
+  validarComprobante,
+  obtenerFacturasValidadasSunat,
+  registrarFacturaValidadaSunat,
+  eliminarFacturaValidadaSunat,
+  verificarFacturaExistenteEnSunat,
+  EstadoContribuyenteNormalizado,
+  CondicionContribuyenteNormalizada,
+  EstadoComprobanteNormalizado,
+  FacturaValidadaSunat,
+  FiltroFacturasValidadas,
+  ParametrosConsultaRucDni,
+  ParametrosValidacionComprobante
+} from '../lib/sunat';
+
+export {
+  consultarRucDni,
+  validarComprobante,
+  obtenerFacturasValidadasSunat,
+  registrarFacturaValidadaSunat,
+  eliminarFacturaValidadaSunat,
+  verificarFacturaExistenteEnSunat
+};
+export type {
+  EstadoContribuyenteNormalizado,
+  CondicionContribuyenteNormalizada,
+  EstadoComprobanteNormalizado,
+  FacturaValidadaSunat,
+  FiltroFacturasValidadas,
+  ParametrosConsultaRucDni,
+  ParametrosValidacionComprobante
+};
 
 export interface SunatPadronResult {
   success: boolean;
@@ -9,6 +42,9 @@ export interface SunatPadronResult {
   apellidos?: string;
   estado: string; // ACTIVO / SUSPENSIÓN / BAJA
   condicion: string; // HABIDO / NO HABIDO
+  estadoNormalizado?: EstadoContribuyenteNormalizado;
+  condicionNormalizada?: CondicionContribuyenteNormalizada;
+  esValidoParaFacturar?: boolean;
   regimen: string; // RMT, RER, RG, RUS, Persona Natural
   autorizadoComprobantes: boolean;
   direccionFiscal: string;
@@ -17,14 +53,20 @@ export interface SunatPadronResult {
 export interface SunatValidezResult {
   success: boolean;
   estadoComprobante: string;
+  estadoNormalizado?: EstadoComprobanteNormalizado;
   codigoEstado: string;
   esValido: boolean;
   rucEmisor?: string;
+  razonSocialEmisor?: string;
   tipoComprobante?: string;
+  tipoComprobanteNombre?: string;
   serieCorrelativo?: string;
   fechaEmision?: string;
   montoTotal?: string;
   condicionEmisor?: string;
+  condicionEmisorNormalizada?: CondicionContribuyenteNormalizada;
+  ticketVerificacion?: string;
+  hashVerificacion?: string;
   mensaje: string;
   timestampConsulta: string;
 }
@@ -243,83 +285,22 @@ export function buildSunatQrString(params: {
 
 /**
  * 1. Consulta de RUC y DNI (Padrón de Contribuyentes SUNAT / RENIEC)
+ * Delega al servicio utilitario centralizado en src/lib/sunat.ts con estados normalizados
  */
-export async function consultarPadronSunat(numeroDocumento: string): Promise<SunatPadronResult> {
-  const clean = (numeroDocumento || '').trim();
-  try {
-    const response = await fetch(`/api/sunat/padron/${encodeURIComponent(clean)}`);
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.success) {
-        return data as SunatPadronResult;
-      }
-    }
-  } catch (err) {
-    console.warn('Fallback local para consulta de padrón SUNAT:', err);
-  }
-
-  // Client fallback if offline
-  const isRuc = clean.length === 11;
-  const endsWithZero = clean.endsWith('000');
-  return {
-    success: true,
-    tipoDocumento: isRuc ? 'RUC' : 'DNI',
-    numero: clean,
-    nombreRazonSocial: isRuc
-      ? `CONTRIBUYENTE PERUANO S.A.C. (${clean})`
-      : `CIUDADANO IDENTIFICADO (${clean})`,
-    estado: endsWithZero ? 'SUSPENSIÓN TEMPORAL' : 'ACTIVO',
-    condicion: endsWithZero ? 'NO HABIDO' : 'HABIDO',
-    regimen: isRuc ? 'Régimen MYPE Tributario (RMT)' : 'Persona Natural (Habilitado Boleta / RHE)',
-    autorizadoComprobantes: !endsWithZero,
-    direccionFiscal: 'AV. AREQUIPA 1850 - LIMA - PERÚ'
-  };
+export async function consultarPadronSunat(
+  numeroDocumento: string | ParametrosConsultaRucDni
+): Promise<SunatPadronResult> {
+  return await consultarRucDni(numeroDocumento);
 }
 
 /**
  * 2. Consulta de Validez de Comprobantes de Pago (CPE SUNAT)
+ * Delega al servicio utilitario centralizado en src/lib/sunat.ts con estados normalizados y registro automático
  */
-export async function validarComprobanteSunat(payload: {
-  rucEmisor: string;
-  tipoComprobante: string;
-  serie: string;
-  numero: string;
-  fechaEmision: string;
-  montoTotal: number;
-}): Promise<SunatValidezResult> {
-  try {
-    const response = await fetch('/api/sunat/validar-cpe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (response.ok) {
-      return await response.json();
-    }
-  } catch (err) {
-    console.warn('Error consultando validez CPE:', err);
-  }
-
-  const cleanSerie = payload.serie.toUpperCase();
-  const cleanNum = payload.numero.padStart(6, '0');
-  const isInvalidTest = payload.rucEmisor.endsWith('000') || cleanNum === '999999';
-
-  return {
-    success: true,
-    estadoComprobante: isInvalidTest ? 'OBSERVADO / ANULADO' : 'ACEPTADO Y VÁLIDO EN SUNAT',
-    codigoEstado: isInvalidTest ? '2' : '1',
-    esValido: !isInvalidTest,
-    rucEmisor: payload.rucEmisor,
-    tipoComprobante: payload.tipoComprobante,
-    serieCorrelativo: `${cleanSerie}-${cleanNum}`,
-    fechaEmision: payload.fechaEmision,
-    montoTotal: Number(payload.montoTotal || 0).toFixed(2),
-    condicionEmisor: isInvalidTest ? 'NO HABIDO' : 'ACTIVO / HABIDO',
-    mensaje: isInvalidTest
-      ? `El comprobante ${cleanSerie}-${cleanNum} registra observaciones o el RUC ${payload.rucEmisor} se encuentra NO HABIDO.`
-      : `El comprobante ${cleanSerie}-${cleanNum} es AUTÉNTICO y figura como ACEPTADO en los registros de SUNAT.`,
-    timestampConsulta: new Date().toISOString()
-  };
+export async function validarComprobanteSunat(
+  payload: ParametrosValidacionComprobante
+): Promise<SunatValidezResult> {
+  return await validarComprobante(payload, true);
 }
 
 /**

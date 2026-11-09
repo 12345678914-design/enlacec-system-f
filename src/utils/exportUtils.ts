@@ -3,8 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Student, Teacher, FinancialTransaction } from '../types';
-import { generateAcademicReportPDF, generateFinancialReportPDF, generateServicesCatalogPDF, generateTeachersRosterPDF } from './pdfGenerator';
+import { Student, Teacher, FinancialTransaction, Factura } from '../types';
+import {
+  generateAcademicReportPDF,
+  generateFinancialReportPDF,
+  generateServicesCatalogPDF,
+  generateTeachersRosterPDF,
+  generateFacturasReportPDF
+} from './pdfGenerator';
 
 export interface CSVHeader<T> {
   label: string;
@@ -94,3 +100,19 @@ export function exportTeachersToPDF(
 ) {
   return generateTeachersRosterPDF(teachers, schoolName, true);
 }
+
+/**
+ * Helper to export filtered facturas list (by year, month, etc.) to formatted downloadable PDF
+ */
+export function exportFacturasToPDF(
+  facturas: Factura[],
+  options: {
+    titulo?: string;
+    periodoLabel?: string;
+    filtroDetalle?: string;
+    docenteNombre?: string;
+  } = {}
+) {
+  return generateFacturasReportPDF(facturas, { ...options, shouldDownload: true });
+}
+

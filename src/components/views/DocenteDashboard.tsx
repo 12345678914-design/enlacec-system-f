@@ -9,13 +9,18 @@ import { AIBoardSandbox } from '../AIBoardSandbox';
 import { AISystemReview } from '../AISystemReview';
 import { TeslaAIChatView } from './TeslaAIChatView';
 import { NewsAnnouncementsView } from './NewsAnnouncementsView';
-import { BovedaFacturasView } from './BovedaFacturasView';
 import { VercelEnvConfigCard } from '../VercelEnvConfigCard';
 import { uploadToCloudinaryClient } from '../../services/clientServices';
-import { AttendanceRecord, StudentAttendanceInstance, AccentColor, ResourceItem } from '../../types';
+import { AttendanceRecord, StudentAttendanceInstance, AccentColor, ResourceItem, Factura } from '../../types';
 import { getThemeClasses } from '../../lib/themeUtils';
-import { exportToCSV, exportTransactionsToPDF } from '../../utils/exportUtils';
-import { generateTeacherBoleta } from '../../utils/pdfGenerator';
+import { exportToCSV, exportTransactionsToPDF, exportFacturasToPDF } from '../../utils/exportUtils';
+import { generateTeacherBoleta, generateSunatElectronicPdf } from '../../utils/pdfGenerator';
+import {
+  generateSunatUblXml,
+  generateSunatCdrXml,
+  generateCpeHash,
+  downloadTextFile
+} from '../../services/sunatService';
 import { 
   Calendar, 
   CalendarClock, 
@@ -65,16 +70,26 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
     transactions, attendance, registerAttendance, 
     theme, updateTheme, news, cursos, refreshCursos,
     servicios, servicioCursos, servicioProfesores,
-    notas, addNota, updateNota, deleteNota, addFactura
+    notas, addNota, updateNota, deleteNota, facturas, addFactura
   } = useApp();
 
   const cl = getThemeClasses(theme.accentColor);
 
   // Match current logged in docente spec details
-  const matchedDocente = teachers.find(t => t.email.toLowerCase() === currentUser?.email.toLowerCase());
-  const teacherId = matchedDocente?.id || (teachers[0]?.id || 'f83d91bb-5991-49e0-811c-dcd2f3c8a001');
-  const teacherName = matchedDocente?.name || currentUser?.name || 'Prof. Carlos Fuentes';
-  const teacherSubject = matchedDocente?.subject || 'Matemáticas';
+  const matchedDocente = teachers.find(
+    t =>
+      t.id === currentUser?.id ||
+      (t.email && currentUser?.email && t.email.toLowerCase() === currentUser.email.toLowerCase())
+  );
+  const teacherId = matchedDocente?.id || currentUser?.id || (teachers[0]?.id || 'f83d91bb-5991-49e0-811c-dcd2f3c8a001');
+  const teacherName = matchedDocente?.name || `${matchedDocente?.nombre || ''} ${matchedDocente?.apellido || ''}`.trim() || currentUser?.name || 'Prof. Carlos Fuentes';
+  const teacherSubject = matchedDocente?.subject || matchedDocente?.especialidad || 'Matemáticas';
+
+  // Estados de filtro para Mis Facturas del Docente (por defecto muestra de este mes)
+  const [docenteFacSearch, setDocenteFacSearch] = useState('');
+  const [docenteFacYear, setDocenteFacYear] = useState<string>(() => String(new Date().getFullYear()));
+  const [docenteFacMonth, setDocenteFacMonth] = useState<string>(() => String(new Date().getMonth() + 1));
+  const [docenteFacEstado, setDocenteFacEstado] = useState<'todos' | 'emitida' | 'pagada'>('todos');
 
   // State for Notas module
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
@@ -1993,6 +2008,324 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
 
 
   /* =========================================================================
+     MODULE: MIS FACTURAS DEL DOCENTE (SOLO FACTURAS DE ASISTENCIAS APROBADAS)
+     ========================================================================= */
+  const renderMisFacturasDocenteValue = () => {
+    const MONTH_LABELS: Record<string, string> = {
+      '1': 'Enero',
+      '2': 'Febrero',
+      '3': 'Marzo',
+      '4': 'Abril',
+      '5': 'Mayo',
+      '6': 'Junio',
+      '7': 'Julio',
+      '8': 'Agosto',
+      '9': 'Septiembre',
+      '10': 'Octubre',
+      '11': 'Noviembre',
+      '12': 'Diciembre'
+    };
+
+    // Filtrar únicamente las facturas del propio profesor generadas al aprobar sus asistencias
+    const misFacturasBase = (facturas || []).filter(f => {
+      if (f.tipo !== 'profesor') return false;
+      if (f.estado === 'anulada') return false;
+      const matchId = f.teacher_id && String(f.teacher_id) === String(teacherId);
+      const matchDni =
+        matchedDocente?.dni &&
+        f.detalles?.dniDocente &&
+        String(f.detalles.dniDocente).replace(/\D/g, '') === String(matchedDocente.dni).replace(/\D/g, '');
+      const cleanTeacherName = teacherName.replace(/^Prof\.\s*/i, '').trim().toLowerCase();
+      const matchName =
+        cleanTeacherName &&
+        (f.detalles?.nombrePersona || '').toLowerCase().includes(cleanTeacherName);
+
+      return Boolean(matchId || matchDni || matchName);
+    });
+
+    const currentY = new Date().getFullYear();
+    const yearsSet = new Set<string>([String(currentY), String(currentY - 1), String(currentY - 2)]);
+    misFacturasBase.forEach(f => {
+      if (f.created_at) {
+        const d = new Date(f.created_at);
+        if (!isNaN(d.getTime())) yearsSet.add(String(d.getFullYear()));
+      }
+    });
+    const availableYears = Array.from(yearsSet).sort((a, b) => Number(b) - Number(a));
+
+    const misFacturasFiltradas = misFacturasBase
+      .filter(f => {
+        const d = f.created_at ? new Date(f.created_at) : new Date();
+        const yr = !isNaN(d.getTime()) ? String(d.getFullYear()) : String(currentY);
+        const mo = !isNaN(d.getTime()) ? String(d.getMonth() + 1) : String(new Date().getMonth() + 1);
+
+        const matchesYear = docenteFacYear === 'todos' || yr === docenteFacYear;
+        const matchesMonth = docenteFacMonth === 'todos' || mo === docenteFacMonth;
+        const matchesEstado = docenteFacEstado === 'todos' || f.estado === docenteFacEstado;
+        const q = docenteFacSearch.toLowerCase().trim();
+        const matchesSearch =
+          !q ||
+          f.id.toLowerCase().includes(q) ||
+          (f.detalles?.serieCorrelativo || '').toLowerCase().includes(q) ||
+          f.concepto.toLowerCase().includes(q);
+
+        return matchesYear && matchesMonth && matchesEstado && matchesSearch;
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    const totalMesFiltrado = misFacturasFiltradas.reduce((acc, f) => acc + Number(f.monto || 0), 0);
+    const totalPagado = misFacturasFiltradas
+      .filter(f => f.estado === 'pagada')
+      .reduce((acc, f) => acc + Number(f.monto || 0), 0);
+    const totalEmitido = misFacturasFiltradas
+      .filter(f => f.estado === 'emitida')
+      .reduce((acc, f) => acc + Number(f.monto || 0), 0);
+
+    return (
+      <div className="space-y-6">
+        {/* Encabezado exclusivo para el Profesor (Sin Bóveda) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-extrabold text-gray-900 dark:text-white tracking-tight flex items-center gap-2.5">
+              <FileText className={`w-7 h-7 ${cl.primaryText}`} />
+              Mis Facturas y Recibos por Asistencias Aprobadas
+            </h2>
+            <p className="text-xs text-gray-500 dark:text-zinc-400 mt-1">
+              Comprobantes de honorarios generados automáticamente para <strong>{teacherName}</strong> cuando Administración aprueba tus sesiones de asistencia.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              const mesNombre = docenteFacMonth === 'todos' ? 'Todos los meses' : MONTH_LABELS[docenteFacMonth] || docenteFacMonth;
+              const anioNombre = docenteFacYear === 'todos' ? 'Todos los años' : docenteFacYear;
+              exportFacturasToPDF(misFacturasFiltradas, {
+                titulo: `MIS FACTURAS POR ASISTENCIAS APROBADAS - ${teacherName.toUpperCase()}`,
+                periodoLabel: `${mesNombre} ${anioNombre}`,
+                filtroDetalle: `Estado: ${docenteFacEstado.toUpperCase()}`,
+                docenteNombre: teacherName
+              });
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shadow-md transition-all cursor-pointer shrink-0"
+          >
+            <Download className="w-4 h-4" />
+            Exportar PDF Filtrado ({misFacturasFiltradas.length})
+          </button>
+        </div>
+
+        {/* Tarjetas de Resumen del Periodo Filtrado */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-gray-150 dark:border-zinc-800 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Total Facturado ({docenteFacMonth === 'todos' ? 'Todos los meses' : MONTH_LABELS[docenteFacMonth]} {docenteFacYear === 'todos' ? '' : docenteFacYear})
+            </span>
+            <p className="text-2xl font-black font-mono text-gray-900 dark:text-white mt-1">
+              S/. {totalMesFiltrado.toFixed(2)}
+            </p>
+            <span className="text-[11px] text-gray-400">{misFacturasFiltradas.length} comprobantes en el filtro</span>
+          </div>
+
+          <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-gray-150 dark:border-zinc-800 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Honorarios Abonados / Pagados</span>
+            <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+              S/. {totalPagado.toFixed(2)}
+            </p>
+            <span className="text-[11px] text-gray-400">Asistencias liquidadas</span>
+          </div>
+
+          <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-gray-150 dark:border-zinc-800 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Emitidas por Cobrar</span>
+            <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
+              S/. {totalEmitido.toFixed(2)}
+            </p>
+            <span className="text-[11px] text-gray-400">Asistencias aprobadas en trámite de pago</span>
+          </div>
+        </div>
+
+        {/* Barra de Filtros por Año y Mes (Por defecto muestra de este mes) */}
+        <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-gray-150 dark:border-zinc-800 shadow-sm flex flex-col lg:flex-row items-center justify-between gap-3">
+          <div className="relative w-full lg:max-w-sm">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={docenteFacSearch}
+              onChange={(e) => setDocenteFacSearch(e.target.value)}
+              placeholder="Buscar por serie (E001), curso o fecha..."
+              className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-xl text-xs text-gray-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-end">
+            {/* Filtro por Año */}
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-xl px-3 py-1.5">
+              <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+              <span className="text-[10px] font-bold uppercase text-gray-400">Año:</span>
+              <select
+                value={docenteFacYear}
+                onChange={(e) => setDocenteFacYear(e.target.value)}
+                className="bg-white text-black dark:bg-black dark:text-white px-2 py-0.5 rounded-md border border-gray-200 dark:border-zinc-700 text-xs font-mono font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="todos" className="bg-white text-black dark:bg-black dark:text-white">Todos</option>
+                {availableYears.map(yr => (
+                  <option key={yr} value={yr} className="bg-white text-black dark:bg-black dark:text-white">{yr}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Filtro por Mes */}
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-xl px-3 py-1.5">
+              <span className="text-[10px] font-bold uppercase text-gray-400">Mes:</span>
+              <select
+                value={docenteFacMonth}
+                onChange={(e) => setDocenteFacMonth(e.target.value)}
+                className="bg-white text-black dark:bg-black dark:text-white px-2 py-0.5 rounded-md border border-gray-200 dark:border-zinc-700 text-xs font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="todos" className="bg-white text-black dark:bg-black dark:text-white">Todos los meses</option>
+                {Object.entries(MONTH_LABELS).map(([num, label]) => (
+                  <option key={num} value={num} className="bg-white text-black dark:bg-black dark:text-white">{label}</option>
+                ))}
+              </select>
+            </div>
+
+            {(docenteFacYear !== String(new Date().getFullYear()) || docenteFacMonth !== String(new Date().getMonth() + 1)) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDocenteFacYear(String(new Date().getFullYear()));
+                  setDocenteFacMonth(String(new Date().getMonth() + 1));
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300 text-xs font-bold cursor-pointer"
+              >
+                Este Mes
+              </button>
+            )}
+
+            <select
+              value={docenteFacEstado}
+              onChange={(e) => setDocenteFacEstado(e.target.value as any)}
+              className="bg-white text-black dark:bg-black dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none cursor-pointer"
+            >
+              <option value="todos" className="bg-white text-black dark:bg-black dark:text-white">Todos los Estados</option>
+              <option value="emitida" className="bg-white text-black dark:bg-black dark:text-white">Emitida (Aprobada)</option>
+              <option value="pagada">Pagada / Abonada</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Tabla de Facturas del Profesor por Asistencias Aprobadas */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-gray-150 dark:border-zinc-800 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-zinc-950/60 border-b border-gray-150 dark:border-zinc-800 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                  <th className="py-3 px-4">Serie / Correlativo</th>
+                  <th className="py-3 px-4">Concepto (Asistencia Aprobada)</th>
+                  <th className="py-3 px-4">Sesiones / Tarifa</th>
+                  <th className="py-3 px-4">Fecha Emisión</th>
+                  <th className="py-3 px-4 text-right">Monto Honorarios</th>
+                  <th className="py-3 px-4 text-center">Estado</th>
+                  <th className="py-3 px-4 text-right">Descargar Comprobante</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-zinc-800/60 text-xs">
+                {misFacturasFiltradas.length > 0 ? (
+                  misFacturasFiltradas.map((factura, idx) => {
+                    const sc = factura.detalles?.serieCorrelativo || `E001-${String(idx + 1).padStart(6, '0')}`;
+                    const ruc = factura.detalles?.rucEmisor || '20000000001';
+                    return (
+                      <tr key={factura.id} className="hover:bg-gray-50/60 dark:hover:bg-zinc-800/30 transition-colors">
+                        <td className="py-3.5 px-4 font-mono font-black text-gray-900 dark:text-white">
+                          {sc}
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-gray-800 dark:text-zinc-200 max-w-md">
+                          {factura.concepto}
+                        </td>
+                        <td className="py-3.5 px-4 text-gray-500 dark:text-zinc-400 font-mono">
+                          {factura.detalles?.clasesDictadas || 1} ses. × S/. {Number(factura.detalles?.tarifaPorClase || factura.monto).toFixed(2)}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-gray-600 dark:text-zinc-300">
+                          {new Date(factura.created_at).toLocaleDateString('es-PE', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric'
+                          })}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono font-black text-sm text-gray-900 dark:text-white">
+                          S/. {Number(factura.monto || 0).toFixed(2)}
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase ${
+                              factura.estado === 'pagada'
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-amber-600 dark:text-amber-400'
+                            }`}
+                          >
+                            <CheckCircle className="w-3 h-3" />
+                            {factura.estado === 'pagada' ? 'Pagada' : 'Aprobada / Emitida'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => generateSunatElectronicPdf(factura, true)}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 text-[10px] font-mono font-bold hover:bg-indigo-100 cursor-pointer flex items-center gap-1"
+                              title="Descargar Recibo por Honorarios PDF con QR SUNAT"
+                            >
+                              <Download className="w-3 h-3" />
+                              PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const xml = generateSunatUblXml(factura);
+                                downloadTextFile(`${ruc}-02-${sc}.xml`, xml);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-zinc-200 text-[10px] font-mono font-bold hover:bg-gray-200 cursor-pointer"
+                              title="Descargar XML UBL 2.1"
+                            >
+                              XML
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const hash = factura.detalles?.hashCpe || generateCpeHash(`${ruc}|${sc}|${factura.monto}`);
+                                const cdr = generateSunatCdrXml({
+                                  rucEmisor: ruc,
+                                  serieCorrelativo: sc,
+                                  tipoComprobanteNombre: 'Recibo por Honorarios Electrónico',
+                                  hashCpe: hash
+                                });
+                                downloadTextFile(`R-${ruc}-02-${sc}.xml`, cdr);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 text-[10px] font-mono font-bold hover:bg-emerald-100 cursor-pointer"
+                              title="Descargar Constancia CDR SUNAT"
+                            >
+                              CDR
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="py-10 text-center text-gray-400 dark:text-zinc-500">
+                      No tienes facturas por asistencias aprobadas en el mes y año seleccionados.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /* =========================================================================
      ROUTER FOR SELECTED TAB
      ========================================================================= */
   const renderViewContent = () => {
@@ -2010,7 +2343,7 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
       case 'finanzas':
         return renderFinanzasValue();
       case 'facturas':
-        return <BovedaFacturasView />;
+        return renderMisFacturasDocenteValue();
       case 'recursos':
         return renderRecursosValue();
       case 'avisos':

@@ -44,6 +44,7 @@ import {
   generateSunatElectronicPdf,
   generateGuiaRemisionPdf
 } from '../../utils/pdfGenerator';
+import { exportFacturasToPDF } from '../../utils/exportUtils';
 import {
   consultarPadronSunat,
   validarComprobanteSunat,
@@ -64,6 +65,15 @@ import {
   SunatGuiaRemision,
   SunatConfig
 } from '../../services/sunatService';
+import {
+  consultarRucDni,
+  validarComprobante,
+  obtenerFacturasValidadasSunat,
+  verificarFacturaExistenteEnSunat,
+  eliminarFacturaValidadaSunat,
+  EstadoComprobanteNormalizado,
+  FacturaValidadaSunat
+} from '../../lib/sunat';
 import { motion, AnimatePresence } from 'motion/react';
 import { Factura, Student, Teacher } from '../../types';
 
@@ -83,6 +93,7 @@ export const BovedaFacturasView: React.FC = () => {
     students, 
     teachers, 
     attendance, 
+    updateAttendanceStatus,
     servicios, 
     servicioCursos, 
     cursos,
@@ -118,9 +129,76 @@ export const BovedaFacturasView: React.FC = () => {
   const [sunatConfig, setSunatConfig] = useState<SunatConfig>(() => getSunatConfig());
   const [showSunatConfigModal, setShowSunatConfigModal] = useState(false);
 
-  // SUNAT Modals States (Validador CPE, Resumen Diario, Comunicación de Baja, Guías de Remisión GRE)
+  // Aprobar Asistencia de Profesores States
+  const [showApproveAttendancePanel, setShowApproveAttendancePanel] = useState(true);
+  const [attendanceFilterTab, setAttendanceFilterTab] = useState<'pendientes' | 'aprobadas' | 'todas'>('pendientes');
+  const [approvingSessionId, setApprovingSessionId] = useState<string | null>(null);
+  const [isApprovingAll, setIsApprovingAll] = useState(false);
+
+  const pendingTeacherAttendances = useMemo(() => {
+    return attendance.filter(
+      att =>
+        att.estado === null ||
+        att.estado === undefined ||
+        ((att.estado as any) !== true &&
+          (att.estado as any) !== false &&
+          (att.estado as any) !== 'ACEPTADO' &&
+          (att.estado as any) !== 'Aceptado' &&
+          (att.estado as any) !== 'RECHAZADO' &&
+          (att.estado as any) !== 'Rechazado')
+    );
+  }, [attendance]);
+
+  const approvedTeacherAttendances = useMemo(() => {
+    return attendance.filter(
+      att =>
+        att.estado === true ||
+        (att.estado as any) === 'ACEPTADO' ||
+        (att.estado as any) === 'Aceptado'
+    );
+  }, [attendance]);
+
+  const filteredTeacherAttendances = useMemo(() => {
+    if (attendanceFilterTab === 'pendientes') return pendingTeacherAttendances;
+    if (attendanceFilterTab === 'aprobadas') return approvedTeacherAttendances;
+    return attendance;
+  }, [attendance, attendanceFilterTab, pendingTeacherAttendances, approvedTeacherAttendances]);
+
+  const handleApproveSingleAttendance = async (sessionId: string) => {
+    setApprovingSessionId(sessionId);
+    try {
+      await updateAttendanceStatus(sessionId, true);
+    } finally {
+      setApprovingSessionId(null);
+    }
+  };
+
+  const handleRejectSingleAttendance = async (sessionId: string) => {
+    setApprovingSessionId(sessionId);
+    try {
+      await updateAttendanceStatus(sessionId, false);
+    } finally {
+      setApprovingSessionId(null);
+    }
+  };
+
+  const handleApproveAllPendingAttendances = async () => {
+    if (pendingTeacherAttendances.length === 0) return;
+    setIsApprovingAll(true);
+    try {
+      for (const att of pendingTeacherAttendances) {
+        await updateAttendanceStatus(att.id, true);
+      }
+    } finally {
+      setIsApprovingAll(false);
+    }
+  };
+
+  // SUNAT Modals States (Validador CPE, Consulta de Facturas Validadas, Resumen Diario, Comunicación de Baja, Guías GRE)
   const [showValidadorCpeModal, setShowValidadorCpeModal] = useState(false);
+  const [validadorModalTab, setValidadorModalTab] = useState<'validar' | 'validadas'>('validar');
   const [valRucEmisor, setValRucEmisor] = useState('20000000001');
+  const [valRazonSocialEmisor, setValRazonSocialEmisor] = useState('COLEGIO ENLACEC - SANDBOX BETA SUNAT');
   const [valTipoComp, setValTipoComp] = useState('01');
   const [valSerie, setValSerie] = useState('F001');
   const [valNumero, setValNumero] = useState('000001');
@@ -128,6 +206,13 @@ export const BovedaFacturasView: React.FC = () => {
   const [valMonto, setValMonto] = useState('150.00');
   const [isValidatingCpe, setIsValidatingCpe] = useState(false);
   const [validezResult, setValidezResult] = useState<SunatValidezResult | null>(null);
+
+  // Consulta de Facturas Validadas por la SUNAT States
+  const [consultaValidadasBusqueda, setConsultaValidadasBusqueda] = useState('');
+  const [consultaValidadasEstado, setConsultaValidadasEstado] = useState<'TODOS' | EstadoComprobanteNormalizado>('TODOS');
+  const [consultaValidadasTipo, setConsultaValidadasTipo] = useState<string>('TODOS');
+  const [consultaValidadasOrigen, setConsultaValidadasOrigen] = useState<'TODOS' | 'EMITIDA_SISTEMA' | 'VALIDADA_EXTERNA'>('TODOS');
+  const [validadasRefreshTick, setValidadasRefreshTick] = useState(0);
 
   // Resumen Diario (RC) & Comunicación de Baja (RA)
   const [showResumenDiarioModal, setShowResumenDiarioModal] = useState(false);
@@ -241,10 +326,42 @@ export const BovedaFacturasView: React.FC = () => {
     });
   };
 
-  // Filter States
+  // Filter States (Por defecto muestra de este mes y año actual)
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterYear, setFilterYear] = useState<string>(() => String(new Date().getFullYear()));
+  const [filterMonth, setFilterMonth] = useState<string>(() => String(new Date().getMonth() + 1));
   const [filterTipo, setFilterTipo] = useState<'todos' | 'estudiante' | 'profesor'>('todos');
   const [filterEstado, setFilterEstado] = useState<'todos' | 'emitida' | 'pagada' | 'anulada'>('todos');
+  const [filterSunatValidadas, setFilterSunatValidadas] = useState<'todos' | 'validadas_sunat' | 'anuladas_baja' | 'control_interno'>('todos');
+
+  const MONTH_LABELS: Record<string, string> = {
+    '1': 'Enero',
+    '2': 'Febrero',
+    '3': 'Marzo',
+    '4': 'Abril',
+    '5': 'Mayo',
+    '6': 'Junio',
+    '7': 'Julio',
+    '8': 'Agosto',
+    '9': 'Septiembre',
+    '10': 'Octubre',
+    '11': 'Noviembre',
+    '12': 'Diciembre'
+  };
+
+  const availableYears = useMemo(() => {
+    const currentY = new Date().getFullYear();
+    const yearsSet = new Set<string>([String(currentY), String(currentY - 1), String(currentY - 2)]);
+    facturas.forEach(f => {
+      if (f.created_at) {
+        const d = new Date(f.created_at);
+        if (!isNaN(d.getTime())) {
+          yearsSet.add(String(d.getFullYear()));
+        }
+      }
+    });
+    return Array.from(yearsSet).sort((a, b) => Number(b) - Number(a));
+  }, [facturas]);
 
   // Emission Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -467,9 +584,16 @@ export const BovedaFacturasView: React.FC = () => {
     }, 4000);
   };
 
-  // Filtered invoices
+  // Filtered invoices (incluye filtro por Año y Mes, por defecto mes actual)
   const filteredFacturas = useMemo(() => {
     return facturas.filter(f => {
+      const fDate = f.created_at ? new Date(f.created_at) : new Date();
+      const fYear = !isNaN(fDate.getTime()) ? String(fDate.getFullYear()) : String(new Date().getFullYear());
+      const fMonth = !isNaN(fDate.getTime()) ? String(fDate.getMonth() + 1) : String(new Date().getMonth() + 1);
+
+      const matchesYear = filterYear === 'todos' || fYear === filterYear;
+      const matchesMonth = filterMonth === 'todos' || fMonth === filterMonth;
+
       const matchesSearch = 
         f.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (f.detalles.serieCorrelativo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -482,20 +606,52 @@ export const BovedaFacturasView: React.FC = () => {
       const matchesTipo = filterTipo === 'todos' || f.tipo === filterTipo;
       const matchesEstado = filterEstado === 'todos' || f.estado === filterEstado;
 
-      return matchesSearch && matchesTipo && matchesEstado;
-    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [facturas, searchTerm, filterTipo, filterEstado]);
+      let matchesSunat = true;
+      if (filterSunatValidadas === 'validadas_sunat') {
+        matchesSunat =
+          f.estado !== 'anulada' &&
+          f.detalles?.modoTributario !== 'interno_sin_ruc' &&
+          (f.detalles?.estadoSunat === 'ACEPTADO' || !f.detalles?.estadoSunat);
+      } else if (filterSunatValidadas === 'anuladas_baja') {
+        matchesSunat = f.estado === 'anulada' || f.detalles?.estadoSunat === 'BAJA_COMUNICADA';
+      } else if (filterSunatValidadas === 'control_interno') {
+        matchesSunat = f.detalles?.modoTributario === 'interno_sin_ruc';
+      }
 
-  // Dashboard Stats
+      return matchesYear && matchesMonth && matchesSearch && matchesTipo && matchesEstado && matchesSunat;
+    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [facturas, filterYear, filterMonth, searchTerm, filterTipo, filterEstado, filterSunatValidadas]);
+
+  // Lista de todas las facturas validadas por la SUNAT (emitidas y externas) usando src/lib/sunat.ts
+  const facturasValidadasSunatList = useMemo(() => {
+    return obtenerFacturasValidadasSunat(
+      {
+        busqueda: consultaValidadasBusqueda,
+        estadoNormalizado: consultaValidadasEstado,
+        tipoComprobante: consultaValidadasTipo,
+        origen: consultaValidadasOrigen
+      },
+      facturas
+    );
+  }, [
+    facturas,
+    consultaValidadasBusqueda,
+    consultaValidadasEstado,
+    consultaValidadasTipo,
+    consultaValidadasOrigen,
+    validadasRefreshTick
+  ]);
+
+  // Dashboard Stats (calculados sobre las facturas filtradas por periodo/criterios)
   const stats = useMemo(() => {
-    const active = facturas.filter(f => f.estado !== 'anulada');
+    const active = filteredFacturas.filter(f => f.estado !== 'anulada');
     const totalEmitido = active.reduce((acc, curr) => acc + curr.monto, 0);
-    const totalCobrado = facturas.filter(f => f.estado === 'pagada').reduce((acc, curr) => acc + curr.monto, 0);
-    const totalPendiente = facturas.filter(f => f.estado === 'emitida').reduce((acc, curr) => acc + curr.monto, 0);
-    const count = facturas.length;
+    const totalCobrado = filteredFacturas.filter(f => f.estado === 'pagada').reduce((acc, curr) => acc + curr.monto, 0);
+    const totalPendiente = filteredFacturas.filter(f => f.estado === 'emitida').reduce((acc, curr) => acc + curr.monto, 0);
+    const count = filteredFacturas.length;
 
     return { totalEmitido, totalCobrado, totalPendiente, count };
-  }, [facturas]);
+  }, [filteredFacturas]);
 
   // Handle student selection to autofill values
   const currentSelectedStudent = useMemo(() => {
@@ -948,23 +1104,47 @@ export const BovedaFacturasView: React.FC = () => {
     });
   };
 
-  // Handle Validación de Comprobantes de Pago (Service #2)
+  // Handle Validación de Comprobantes de Pago (Service #2 via src/lib/sunat.ts)
   const handleRunValidadorCpe = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsValidatingCpe(true);
     try {
-      const res = await validarComprobanteSunat({
-        rucEmisor: valRucEmisor,
-        tipoComprobante: valTipoComp,
-        serie: valSerie,
-        numero: valNumero,
-        fechaEmision: valFecha,
-        montoTotal: parseFloat(valMonto) || 0
-      });
+      const res = await validarComprobante(
+        {
+          rucEmisor: valRucEmisor,
+          razonSocialEmisor: valRazonSocialEmisor,
+          tipoComprobante: valTipoComp,
+          serie: valSerie,
+          numero: valNumero,
+          fechaEmision: valFecha,
+          montoTotal: parseFloat(valMonto) || 0
+        },
+        true
+      );
       setValidezResult(res);
+      setValidadasRefreshTick(prev => prev + 1);
+      addNotification({
+        title: `Validación SUNAT: ${res.estadoNormalizado}`,
+        content: `${res.serieCorrelativo} (${res.rucEmisor}) -> Estado normalizado: ${res.estadoNormalizado}`,
+        type: res.esValido ? 'success' : 'warning'
+      });
     } finally {
       setIsValidatingCpe(false);
     }
+  };
+
+  // Verificar directamente una factura de la tabla contra SUNAT Sandbox (src/lib/sunat.ts)
+  const handleVerificarFacturaEnSunat = async (factura: Factura) => {
+    const res = await verificarFacturaExistenteEnSunat(factura);
+    setValidadasRefreshTick(prev => prev + 1);
+    setValidezResult(res);
+    setValidadorModalTab('validadas');
+    setShowValidadorCpeModal(true);
+    addNotification({
+      title: `Factura Verificada en SUNAT (${res.estadoNormalizado})`,
+      content: `${res.serieCorrelativo} · Ticket: ${res.ticketVerificacion} · Condición: ${res.condicionEmisorNormalizada}`,
+      type: res.esValido ? 'success' : 'warning'
+    });
   };
 
   // Handle Resumen Diario de Boletas (Service #3A)
@@ -1145,6 +1325,31 @@ export const BovedaFacturasView: React.FC = () => {
           </button>
           <button
             type="button"
+            onClick={() => {
+              setValidadorModalTab('validadas');
+              setShowValidadorCpeModal(true);
+            }}
+            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-all text-xs cursor-pointer"
+            title="Ver y buscar todas las facturas aprobadas/validadas en la SUNAT"
+          >
+            <ShieldCheck className="w-4 h-4 text-white" />
+            <span>Facturas Validadas SUNAT ({facturasValidadasSunatList.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowApproveAttendancePanel(prev => !prev)}
+            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/60 transition-all text-xs cursor-pointer"
+          >
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Aprobar Asistencias Docentes</span>
+            {pendingTeacherAttendances.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-black font-mono">
+                {pendingTeacherAttendances.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => setIsModalOpen(true)}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-white transition-all duration-300 shadow-md ${cl.primaryBg} ${cl.primaryHoverBg} hover:shadow-lg cursor-pointer`}
           >
@@ -1222,12 +1427,13 @@ export const BovedaFacturasView: React.FC = () => {
           </div>
         </div>
 
-        {/* Action Buttons for the 5 SUNAT API Services */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
+        {/* Action Buttons for the 5 SUNAT API Services + Consulta de Facturas Validadas */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 pt-1">
           <button
             type="button"
             onClick={() => {
               setValidezResult(null);
+              setValidadorModalTab('validar');
               setShowValidadorCpeModal(true);
             }}
             className="p-2.5 rounded-xl border border-gray-200 dark:border-white/10 hover:border-indigo-400 dark:hover:border-indigo-500 bg-gray-50/70 dark:bg-slate-950/60 flex items-center gap-2.5 text-left transition-all cursor-pointer"
@@ -1238,6 +1444,27 @@ export const BovedaFacturasView: React.FC = () => {
             <div className="min-w-0">
               <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">Validar Comprobante CPE</p>
               <p className="text-[10px] text-gray-500 dark:text-zinc-400 truncate">Verifica autenticidad en SUNAT</p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setValidadorModalTab('validadas');
+              setShowValidadorCpeModal(true);
+            }}
+            className="p-2.5 rounded-xl border-2 border-emerald-500/60 dark:border-emerald-500/50 hover:border-emerald-600 bg-emerald-50/70 dark:bg-emerald-950/30 flex items-center gap-2.5 text-left transition-all cursor-pointer shadow-xs"
+          >
+            <div className="p-2 rounded-lg bg-emerald-600 text-white shadow-xs">
+              <ShieldCheck className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-extrabold text-emerald-900 dark:text-emerald-200 truncate">
+                Facturas Validadas SUNAT ({facturasValidadasSunatList.length})
+              </p>
+              <p className="text-[10px] text-emerald-700 dark:text-emerald-400 truncate font-semibold">
+                Buscar facturas aprobadas en SUNAT
+              </p>
             </div>
           </button>
 
@@ -1352,40 +1579,371 @@ export const BovedaFacturasView: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters and Search toolbar */}
-      <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm flex flex-col md:flex-row items-center gap-4 justify-between">
-        <div className="relative w-full md:max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Buscar por Serie (B001, F001), DNI/RUC o nombre..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 placeholder:text-gray-400"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-          <select
-            value={filterTipo}
-            onChange={(e) => setFilterTipo(e.target.value as any)}
-            className="bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-700 dark:text-slate-350 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
+      {/* PANEL DE APROBACIÓN DE ASISTENCIAS REGISTRADAS POR PROFESORES (Genera Factura en Sistema + Factura Personal del Profesor) */}
+      <AnimatePresence>
+        {showApproveAttendancePanel && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="bg-white dark:bg-slate-900/60 border border-emerald-200/80 dark:border-emerald-500/20 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4"
           >
-            <option value="todos">Todos los Tipos</option>
-            <option value="estudiante">Matrícula Estudiantes (B001 / F001 / NV01)</option>
-            <option value="profesor">Salarios Docentes por Asistencia (E001 / LQ01)</option>
-          </select>
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-gray-100 dark:border-white/10 pb-3.5">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <CheckCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">
+                      Aprobar Asistencias Registradas por Profesores
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-bold">
+                      {pendingTeacherAttendances.length} pendiente(s) por aprobar
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
+                      {approvedTeacherAttendances.length} aprobada(s) y facturada(s)
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-zinc-400 mt-0.5">
+                    Al aprobar una asistencia registrada por un docente, el sistema genera automáticamente su Recibo por Honorarios Electrónico (<code className="font-mono font-bold">E001</code>) y lo agrega tanto a las <strong>Facturas del Sistema</strong> como a <strong>Mis Facturas</strong> personales del profesor.
+                  </p>
+                </div>
+              </div>
 
-          <select
-            value={filterEstado}
-            onChange={(e) => setFilterEstado(e.target.value as any)}
-            className="bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-700 dark:text-slate-350 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
-          >
-            <option value="todos">Todos los Estados</option>
-            <option value="emitida">Emitida / Pendiente</option>
-            <option value="pagada">Pagada / Cobrada</option>
-            <option value="anulada">Anulada (Con Baja RA)</option>
-          </select>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center bg-gray-100 dark:bg-slate-950 p-1 rounded-xl border border-gray-200 dark:border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceFilterTab('pendientes')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      attendanceFilterTab === 'pendientes'
+                        ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800 dark:text-zinc-400'
+                    }`}
+                  >
+                    Pendientes ({pendingTeacherAttendances.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceFilterTab('aprobadas')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      attendanceFilterTab === 'aprobadas'
+                        ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800 dark:text-zinc-400'
+                    }`}
+                  >
+                    Aprobadas ({approvedTeacherAttendances.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceFilterTab('todas')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      attendanceFilterTab === 'todas'
+                        ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800 dark:text-zinc-400'
+                    }`}
+                  >
+                    Todas ({attendance.length})
+                  </button>
+                </div>
+
+                {pendingTeacherAttendances.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={isApprovingAll}
+                    onClick={handleApproveAllPendingAttendances}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    {isApprovingAll ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    <span>Aprobar Todas ({pendingTeacherAttendances.length})</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowApproveAttendancePanel(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Ocultar panel de asistencias"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {filteredTeacherAttendances.length === 0 ? (
+              <div className="p-6 text-center bg-gray-50/70 dark:bg-slate-950/40 rounded-xl border border-gray-100 dark:border-white/5">
+                <p className="text-xs font-bold text-slate-600 dark:text-zinc-300">
+                  {attendanceFilterTab === 'pendientes'
+                    ? '¡Excelente! Todas las asistencias registradas por los profesores ya han sido revisadas y facturadas.'
+                    : 'No se encontraron registros de asistencia en esta categoría.'}
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-gray-50/80 dark:bg-slate-950/60 border-b border-gray-200 dark:border-white/10 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                      <th className="py-2.5 px-3">Fecha / Horario</th>
+                      <th className="py-2.5 px-3">Profesor</th>
+                      <th className="py-2.5 px-3">Curso / Clase Dictada</th>
+                      <th className="py-2.5 px-3 text-center">Alumnos Presentes</th>
+                      <th className="py-2.5 px-3 text-center">Sesiones</th>
+                      <th className="py-2.5 px-3 text-right">Honorarios (S/.)</th>
+                      <th className="py-2.5 px-3 text-center">Estado</th>
+                      <th className="py-2.5 px-3 text-right">Acción (Facturar)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-white/5">
+                    {filteredTeacherAttendances.map((att) => {
+                      const prof = teachers.find(
+                        t =>
+                          t.id === att.teacherId ||
+                          t.codigo === att.teacherId ||
+                          t.name?.toLowerCase() === (att.teacherName || '').toLowerCase()
+                      );
+                      const profName = prof ? prof.name : (att.teacherName || 'Docente');
+                      const sesiones = Number(att.cantidadSesiones) || 1;
+                      const montoCalculado = Number(att.monto) > 0 ? Number(att.monto) : sesiones * 150;
+                      const isApproved =
+                        att.estado === true ||
+                        (att.estado as any) === 'ACEPTADO' ||
+                        (att.estado as any) === 'Aceptado';
+                      const isRejected =
+                        att.estado === false ||
+                        (att.estado as any) === 'RECHAZADO' ||
+                        (att.estado as any) === 'Rechazado';
+                      const presentCount = Array.isArray(att.students)
+                        ? att.students.filter(s => s.present).length
+                        : 0;
+                      const totalStudents = Array.isArray(att.students) ? att.students.length : 0;
+
+                      const linkedInvoice = facturas.find(
+                        f =>
+                          f.detalles?.idSesionAsistencia === String(att.id) ||
+                          (f.tipo === 'profesor' &&
+                            (f.teacher_id === (prof?.id || att.teacherId)) &&
+                            f.concepto.includes(`(${att.date})`))
+                      );
+
+                      return (
+                        <tr key={att.id} className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02] transition-colors">
+                          <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-zinc-300 whitespace-nowrap">
+                            <span className="font-bold block">{att.date || 'Sin fecha'}</span>
+                            <span className="text-[10px] text-gray-400">
+                              {att.inicio?.substring(0, 5) || att.time || '08:00'} - {att.fin?.substring(0, 5) || '10:00'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <p className="font-bold text-slate-800 dark:text-slate-100">{profName}</p>
+                            <p className="text-[10px] text-gray-400 font-mono">
+                              DNI: {prof?.dni || '72345678'} · {prof?.subject || 'Docente'}
+                            </p>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <p className="font-bold text-indigo-600 dark:text-indigo-400">{att.course || 'Clase General'}</p>
+                            {att.comments && (
+                              <p className="text-[10px] text-gray-400 truncate max-w-[220px]" title={att.comments}>
+                                {att.comments}
+                              </p>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono">
+                            <span className="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-slate-800 text-slate-700 dark:text-zinc-300 font-bold">
+                              {presentCount}/{totalStudents}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-700 dark:text-zinc-300">
+                            {sesiones}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                            S/. {montoCalculado.toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            {isApproved ? (
+                              <div className="inline-flex flex-col items-center">
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
+                                  ✓ Aprobada y Facturada
+                                </span>
+                                {linkedInvoice?.detalles?.serieCorrelativo && (
+                                  <span className="text-[9px] font-mono text-gray-400 mt-0.5">
+                                    CPE: {linkedInvoice.detalles.serieCorrelativo}
+                                  </span>
+                                )}
+                              </div>
+                            ) : isRejected ? (
+                              <span className="px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[10px] font-bold">
+                                ✕ Rechazada
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-bold">
+                                Pendiente Aprobación
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                disabled={isApproved || approvingSessionId === att.id}
+                                onClick={() => handleApproveSingleAttendance(att.id)}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 ${
+                                  isApproved
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 opacity-75 cursor-default'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm cursor-pointer'
+                                }`}
+                                title="Aprobar asistencia y agregar factura al sistema y al portal del profesor"
+                              >
+                                {approvingSessionId === att.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Check className="w-3.5 h-3.5" />
+                                )}
+                                <span>{isApproved ? 'En Facturas' : 'Aprobar y Facturar'}</span>
+                              </button>
+                              {!isApproved && (
+                                <button
+                                  type="button"
+                                  disabled={isRejected || approvingSessionId === att.id}
+                                  onClick={() => handleRejectSingleAttendance(att.id)}
+                                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                                    isRejected
+                                      ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 opacity-75 cursor-default'
+                                      : 'bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 cursor-pointer'
+                                  }`}
+                                  title="Rechazar asistencia"
+                                >
+                                  {isRejected ? 'Rechazada' : 'Rechazar'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Filters and Search toolbar (con filtro por Año y Mes - por defecto este mes - y Exportación PDF) */}
+      <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm flex flex-col gap-3">
+        <div className="flex flex-col lg:flex-row items-center gap-3 justify-between">
+          <div className="relative w-full lg:max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por Serie (B001, F001), DNI/RUC o nombre..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 placeholder:text-gray-400"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
+            {/* Filtro por Año */}
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl px-2.5 py-1.5">
+              <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+              <span className="text-[10px] font-bold uppercase text-gray-400">Año:</span>
+              <select
+                value={filterYear}
+                onChange={(e) => setFilterYear(e.target.value)}
+                className="bg-white text-black dark:bg-black dark:text-white px-2 py-0.5 rounded-md border border-gray-200 dark:border-zinc-700 text-xs font-mono font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="todos" className="bg-white text-black dark:bg-black dark:text-white">Todos</option>
+                {availableYears.map(yr => (
+                  <option key={yr} value={yr} className="bg-white text-black dark:bg-black dark:text-white">{yr}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Filtro por Mes (Por defecto muestra de este mes) */}
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl px-2.5 py-1.5">
+              <span className="text-[10px] font-bold uppercase text-gray-400">Mes:</span>
+              <select
+                value={filterMonth}
+                onChange={(e) => setFilterMonth(e.target.value)}
+                className="bg-white text-black dark:bg-black dark:text-white px-2 py-0.5 rounded-md border border-gray-200 dark:border-zinc-700 text-xs font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="todos" className="bg-white text-black dark:bg-black dark:text-white">Todos los meses</option>
+                {Object.entries(MONTH_LABELS).map(([num, label]) => (
+                  <option key={num} value={num} className="bg-white text-black dark:bg-black dark:text-white">{label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Botón rápido para volver a Este Mes */}
+            {(filterYear !== String(new Date().getFullYear()) || filterMonth !== String(new Date().getMonth() + 1)) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterYear(String(new Date().getFullYear()));
+                  setFilterMonth(String(new Date().getMonth() + 1));
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300 text-xs font-bold cursor-pointer"
+              >
+                Este Mes
+              </button>
+            )}
+
+            <select
+              value={filterTipo}
+              onChange={(e) => setFilterTipo(e.target.value as any)}
+              className="bg-white text-black dark:bg-black dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
+            >
+              <option value="todos" className="bg-white text-black dark:bg-black dark:text-white">Todos los Tipos</option>
+              <option value="estudiante" className="bg-white text-black dark:bg-black dark:text-white">Matrícula Estudiantes (B001 / F001 / NV01)</option>
+              <option value="profesor" className="bg-white text-black dark:bg-black dark:text-white">Salarios Docentes por Asistencia (E001 / LQ01)</option>
+            </select>
+
+            <select
+              value={filterEstado}
+              onChange={(e) => setFilterEstado(e.target.value as any)}
+              className="bg-white text-black dark:bg-black dark:text-white border border-gray-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
+            >
+              <option value="todos" className="bg-white text-black dark:bg-black dark:text-white">Todos los Estados</option>
+              <option value="emitida" className="bg-white text-black dark:bg-black dark:text-white">Emitida / Pendiente</option>
+              <option value="pagada" className="bg-white text-black dark:bg-black dark:text-white">Pagada / Cobrada</option>
+              <option value="anulada" className="bg-white text-black dark:bg-black dark:text-white">Anulada (Con Baja RA)</option>
+            </select>
+
+            <select
+              value={filterSunatValidadas}
+              onChange={(e) => setFilterSunatValidadas(e.target.value as any)}
+              className="bg-white text-black dark:bg-black dark:text-white border border-emerald-300 dark:border-emerald-700 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer font-bold"
+            >
+              <option value="todos">Validación SUNAT: Todas</option>
+              <option value="validadas_sunat">Solo Facturas Validadas por SUNAT (ACEPTADO)</option>
+              <option value="anuladas_baja">Anuladas con Baja RA en SUNAT</option>
+              <option value="control_interno">Notas Internas (Sin RUC)</option>
+            </select>
+
+            {/* Botón Exportar PDF Filtrado */}
+            <button
+              type="button"
+              onClick={() => {
+                const mesNombre = filterMonth === 'todos' ? 'Todos los meses' : MONTH_LABELS[filterMonth] || filterMonth;
+                const anioNombre = filterYear === 'todos' ? 'Todos los años' : filterYear;
+                exportFacturasToPDF(filteredFacturas, {
+                  titulo: 'REPORTE DE FACTURAS Y COMPROBANTES FILTRADOS - ADMINISTRACION',
+                  periodoLabel: `${mesNombre} ${anioNombre}`,
+                  filtroDetalle: `Tipo: ${filterTipo.toUpperCase()} | Estado: ${filterEstado.toUpperCase()} | SUNAT: ${filterSunatValidadas.toUpperCase()}`
+                });
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shadow-sm transition-all cursor-pointer"
+              title="Exportar en PDF las facturas filtradas actualmente"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Exportar PDF ({filteredFacturas.length})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1547,6 +2105,17 @@ export const BovedaFacturasView: React.FC = () => {
                             CDR
                           </button>
 
+                          {/* Verificar Validez en SUNAT Sandbox (Botón con Escudo Verde) */}
+                          <button
+                            type="button"
+                            onClick={() => handleVerificarFacturaEnSunat(factura)}
+                            title="Consultar y validar estado del comprobante en SUNAT Sandbox"
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            Validar SUNAT
+                          </button>
+
                           {/* Comunicación de Baja (RA) / Delete */}
                           {factura.estado !== 'anulada' ? (
                             <button
@@ -1577,8 +2146,26 @@ export const BovedaFacturasView: React.FC = () => {
                 })
               ) : (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-gray-400 dark:text-zinc-500">
-                    No se encontraron comprobantes registrados con los filtros aplicados.
+                  <td colSpan={7} className="py-8 text-center text-gray-400 dark:text-zinc-500 space-y-3">
+                    <p className="text-xs font-bold">
+                      No se encontraron comprobantes registrados en el mes/filtro seleccionado ({filterMonth === 'todos' ? 'Todos' : MONTH_LABELS[filterMonth]} {filterYear}).
+                    </p>
+                    {facturas.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterYear('todos');
+                          setFilterMonth('todos');
+                          setFilterTipo('todos');
+                          setFilterEstado('todos');
+                          setFilterSunatValidadas('todos');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
+                      >
+                        <Calendar className="w-3.5 h-3.5" />
+                        Ver todas las facturas de todos los meses ({facturas.length})
+                      </button>
+                    )}
                   </td>
                 </tr>
               )}
@@ -2102,7 +2689,7 @@ export const BovedaFacturasView: React.FC = () => {
       </AnimatePresence>
 
       {/* =====================================================================
-          MODAL 2: CONSULTA DE VALIDEZ DE COMPROBANTES DE PAGO (SERVICIO #2)
+          MODAL 2: VALIDACIÓN DE COMPROBANTES Y CONSULTA DE FACTURAS VALIDADAS SUNAT
          ===================================================================== */}
       <AnimatePresence>
         {showValidadorCpeModal && (
@@ -2118,118 +2705,322 @@ export const BovedaFacturasView: React.FC = () => {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4"
+              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-3xl p-6 relative z-10 shadow-2xl max-h-[90vh] flex flex-col space-y-4 overflow-hidden"
             >
               <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
-                <div className="flex items-center gap-2">
-                  <FileCheck2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                    <FileCheck2 className="w-5 h-5" />
+                  </div>
                   <div>
                     <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">
-                      Consulta de Validez de Comprobante (SUNAT)
+                      Validador CPE y Consulta de Facturas Validadas por la SUNAT
                     </h3>
-                    <p className="text-[10px] text-gray-400">Verifica si una factura o boleta es auténtica y está declarada</p>
+                    <p className="text-[10px] text-gray-400">
+                      Servicio utilitario <code className="font-mono">src/lib/sunat.ts</code> (Sandbox) con estados normalizados
+                    </p>
                   </div>
                 </div>
-                <button type="button" onClick={() => setShowValidadorCpeModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => setShowValidadorCpeModal(false)}
+                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <form onSubmit={handleRunValidadorCpe} className="space-y-3 text-xs">
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">RUC del Emisor</label>
-                    <input
-                      required
-                      type="text"
-                      maxLength={11}
-                      value={valRucEmisor}
-                      onChange={(e) => setValRucEmisor(e.target.value.replace(/\D/g, ''))}
-                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Tipo Comprobante</label>
-                    <select
-                      value={valTipoComp}
-                      onChange={(e) => setValTipoComp(e.target.value)}
-                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-bold"
+              {/* Pestañas: Validar Nuevo CPE vs Consultar Facturas Validadas */}
+              <div className="flex bg-gray-100 dark:bg-slate-950 p-1 rounded-xl border border-gray-200 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setValidadorModalTab('validar')}
+                  className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    validadorModalTab === 'validar'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-800 dark:text-zinc-400'
+                  }`}
+                >
+                  <FileCheck2 className="w-3.5 h-3.5" />
+                  Validar Comprobante en SUNAT
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValidadorModalTab('validadas')}
+                  className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    validadorModalTab === 'validadas'
+                      ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-800 dark:text-zinc-400'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Consultar Facturas Validadas ({facturasValidadasSunatList.length})
+                </button>
+              </div>
+
+              {validadorModalTab === 'validar' ? (
+                <div className="space-y-4 overflow-y-auto pr-1">
+                  <form onSubmit={handleRunValidadorCpe} className="space-y-3 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">RUC del Emisor</label>
+                        <div className="flex gap-1.5">
+                          <input
+                            required
+                            type="text"
+                            maxLength={11}
+                            value={valRucEmisor}
+                            onChange={(e) => setValRucEmisor(e.target.value.replace(/\D/g, ''))}
+                            className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const info = await consultarRucDni({ numero: valRucEmisor, tipo: 'RUC' });
+                              if (info.nombreRazonSocial) {
+                                setValRazonSocialEmisor(info.nombreRazonSocial);
+                              }
+                            }}
+                            title="Consultar RUC en Padrón SUNAT"
+                            className="px-2.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-300 rounded-xl font-bold text-[10px] cursor-pointer"
+                          >
+                            RUC
+                          </button>
+                        </div>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Razón Social del Emisor</label>
+                        <input
+                          type="text"
+                          value={valRazonSocialEmisor}
+                          onChange={(e) => setValRazonSocialEmisor(e.target.value)}
+                          placeholder="Razón Social del emisor..."
+                          className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-semibold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Tipo Comprobante</label>
+                        <select
+                          value={valTipoComp}
+                          onChange={(e) => setValTipoComp(e.target.value)}
+                          className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-bold"
+                        >
+                          <option value="01">01 - Factura Electrónica</option>
+                          <option value="03">03 - Boleta de Venta</option>
+                          <option value="02">02 - Recibo por Honorarios</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Serie (Ej. F001 / B001)</label>
+                        <input
+                          required
+                          type="text"
+                          value={valSerie}
+                          onChange={(e) => setValSerie(e.target.value.toUpperCase())}
+                          className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Número Correlativo</label>
+                        <input
+                          required
+                          type="text"
+                          value={valNumero}
+                          onChange={(e) => setValNumero(e.target.value)}
+                          className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Fecha Emisión</label>
+                        <input
+                          required
+                          type="date"
+                          value={valFecha}
+                          onChange={(e) => setValFecha(e.target.value)}
+                          className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Importe Total (S/.)</label>
+                        <input
+                          required
+                          type="number"
+                          step="0.01"
+                          value={valMonto}
+                          onChange={(e) => setValMonto(e.target.value)}
+                          className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isValidatingCpe}
+                      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl cursor-pointer flex items-center justify-center gap-2"
                     >
-                      <option value="01">01 - Factura Electrónica</option>
-                      <option value="03">03 - Boleta de Venta</option>
-                      <option value="02">02 - Recibo por Honorarios</option>
+                      {isValidatingCpe ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                      Validar Comprobante y Registrar en Facturas Validadas SUNAT
+                    </button>
+                  </form>
+
+                  {validezResult && (
+                    <div className={`p-4 rounded-xl border text-xs space-y-2 ${
+                      validezResult.esValido
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                    }`}>
+                      <div className="font-black flex flex-wrap items-center justify-between gap-2">
+                        <span>Estado Normalizado: {validezResult.estadoNormalizado || validezResult.estadoComprobante}</span>
+                        <span className="font-mono">
+                          Condición: {validezResult.condicionEmisorNormalizada || validezResult.condicionEmisor} · Código SUNAT: {validezResult.codigoEstado}
+                        </span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed">{validezResult.mensaje}</p>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-current/15 font-mono text-[10px]">
+                        <span>Ticket: {validezResult.ticketVerificacion || 'VAL-SUNAT'}</span>
+                        <span>Hash: {(validezResult.hashVerificacion || '').slice(0, 22)}...</span>
+                        <button
+                          type="button"
+                          onClick={() => setValidadorModalTab('validadas')}
+                          className="underline font-bold cursor-pointer"
+                        >
+                          Ver en Historial de Facturas Validadas →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col space-y-3 overflow-hidden text-xs">
+                  {/* Barra de filtros para consultar las facturas validadas por la SUNAT */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <div className="sm:col-span-2 relative">
+                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={consultaValidadasBusqueda}
+                        onChange={(e) => setConsultaValidadasBusqueda(e.target.value)}
+                        placeholder="Buscar por RUC, Serie (F001/B001), Razón Social o Ticket..."
+                        className="w-full pl-8 pr-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs"
+                      />
+                    </div>
+                    <select
+                      value={consultaValidadasEstado}
+                      onChange={(e) => setConsultaValidadasEstado(e.target.value as any)}
+                      className="p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-bold text-xs"
+                    >
+                      <option value="TODOS">Estado: Todos</option>
+                      <option value="ACEPTADO">ACEPTADO (Válido)</option>
+                      <option value="ANULADO">ANULADO (Baja RA)</option>
+                      <option value="OBSERVADO">OBSERVADO</option>
+                      <option value="NO_EXISTE">NO EXISTE</option>
+                    </select>
+                    <select
+                      value={consultaValidadasOrigen}
+                      onChange={(e) => setConsultaValidadasOrigen(e.target.value as any)}
+                      className="p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-bold text-xs"
+                    >
+                      <option value="TODOS">Origen: Todos</option>
+                      <option value="EMITIDA_SISTEMA">Emitidas en Sistema</option>
+                      <option value="VALIDADA_EXTERNA">Validadas de Proveedores</option>
                     </select>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Serie (Ej. F001 / B001)</label>
-                    <input
-                      required
-                      type="text"
-                      value={valSerie}
-                      onChange={(e) => setValSerie(e.target.value.toUpperCase())}
-                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Número Correlativo</label>
-                    <input
-                      required
-                      type="text"
-                      value={valNumero}
-                      onChange={(e) => setValNumero(e.target.value)}
-                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
-                    />
-                  </div>
-                </div>
+                  {/* Tabla de Facturas Validadas por la SUNAT */}
+                  <div className="flex-1 overflow-y-auto border border-gray-200 dark:border-white/10 rounded-xl divide-y divide-gray-100 dark:divide-white/5">
+                    {facturasValidadasSunatList.length > 0 ? (
+                      facturasValidadasSunatList.map((item: FacturaValidadaSunat) => (
+                        <div
+                          key={item.id}
+                          className="p-3 hover:bg-gray-50/70 dark:hover:bg-slate-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                        >
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono font-black text-slate-900 dark:text-white">
+                                {item.serieCorrelativo}
+                              </span>
+                              <span className="text-[10px] font-mono text-gray-500">
+                                ({item.tipoComprobanteNombre})
+                              </span>
+                              <span
+                                className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
+                                  item.estadoNormalizado === 'ACEPTADO'
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                    : item.estadoNormalizado === 'ANULADO'
+                                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                }`}
+                              >
+                                {item.estadoNormalizado} · {item.condicionContribuyente}
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200 truncate">
+                              Emisor: {item.razonSocialEmisor} (RUC: {item.rucEmisor})
+                            </p>
+                            <p className="text-[10px] text-gray-500 font-mono">
+                              Receptor: {item.nombreReceptor} ({item.docReceptor}) · Fecha: {item.fechaEmision} · Ticket: {item.ticketSunat}
+                            </p>
+                          </div>
 
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Fecha Emisión</label>
-                    <input
-                      required
-                      type="date"
-                      value={valFecha}
-                      onChange={(e) => setValFecha(e.target.value)}
-                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Importe Total (S/.)</label>
-                    <input
-                      required
-                      type="number"
-                      step="0.01"
-                      value={valMonto}
-                      onChange={(e) => setValMonto(e.target.value)}
-                      className="w-full p-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl font-mono font-bold"
-                    />
-                  </div>
-                </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="text-right mr-1">
+                              <p className="font-mono font-black text-sm text-slate-900 dark:text-white">
+                                S/. {Number(item.montoTotal || 0).toFixed(2)}
+                              </p>
+                              <p className="text-[9px] font-mono text-gray-400">
+                                IGV: S/. {Number(item.igvMonto || 0).toFixed(2)}
+                              </p>
+                            </div>
 
-                <button
-                  type="submit"
-                  disabled={isValidatingCpe}
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl cursor-pointer flex items-center justify-center gap-2"
-                >
-                  {isValidatingCpe ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                  Consultar Validez en SUNAT
-                </button>
-              </form>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const cdrXml = generateSunatCdrXml({
+                                  rucEmisor: item.rucEmisor,
+                                  serieCorrelativo: item.serieCorrelativo,
+                                  tipoComprobanteNombre: item.tipoComprobanteNombre,
+                                  hashCpe: item.hashCpe,
+                                  ticketSunat: item.ticketSunat
+                                });
+                                downloadTextFile(
+                                  `R-${item.rucEmisor}-${item.tipoComprobanteCodigo}-${item.serieCorrelativo}.xml`,
+                                  cdrXml
+                                );
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 font-mono font-bold text-[10px] hover:bg-emerald-100 cursor-pointer"
+                              title="Descargar Constancia de Recepción CDR XML"
+                            >
+                              CDR XML
+                            </button>
 
-              {validezResult && (
-                <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
-                  validezResult.esValido
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                    : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
-                }`}>
-                  <div className="font-black flex items-center justify-between">
-                    <span>Estado: {validezResult.estadoComprobante}</span>
-                    <span className="font-mono">Código: {validezResult.codigoEstado}</span>
+                            {item.origen === 'VALIDADA_EXTERNA' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  eliminarFacturaValidadaSunat(item.id);
+                                  setValidadasRefreshTick(prev => prev + 1);
+                                }}
+                                className="p-1.5 rounded-lg bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400 hover:bg-rose-100 cursor-pointer"
+                                title="Eliminar del historial"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-10 text-center text-gray-400">
+                        No se encontraron facturas validadas con los filtros seleccionados.
+                      </div>
+                    )}
                   </div>
-                  <p className="text-[11px] leading-relaxed">{validezResult.mensaje}</p>
                 </div>
               )}
             </motion.div>

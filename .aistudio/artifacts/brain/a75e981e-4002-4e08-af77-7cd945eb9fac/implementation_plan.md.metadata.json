@@ -1,0 +1,6 @@
+{
+  "summary": "Plan actualizado para integrar las 5 capacidades de la API de SUNAT (1. Consulta de RUC/DNI y Padrón de Contribuyentes con Estado/Condición/Régimen, 2. Consulta de Validez de Comprobantes de Pago, 3. Emisión de Resúmenes Diarios y Comunicación de Bajas, 4. Consulta y Emisión de Guías de Remisión Electrónica GRE, y 5. Descarga de Reportes Tributarios PDF/XML/CDR) directamente dentro de los módulos existentes del sistema (Estudiantes, Docentes, Finanzas y Bóveda de Facturas) sin crear nuevos módulos en el menú lateral.",
+  "updatedAt": "2026-11-04T03:25:27.672316842Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

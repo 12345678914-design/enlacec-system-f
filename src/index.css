@@ -537,3 +537,71 @@ a {
   box-shadow: 0 12px 25px -10px rgba(0, 0, 0, 0.08);
 }
 
+/* --- DYNAMIC GLOBAL COMBOBOX (SELECT / OPTION) STYLING --- */
+/* Light mode: White background with Black text */
+select,
+select:focus,
+html:not(.dark) select,
+html:not(.dark) select:focus,
+body:not(.dark) select,
+body:not(.dark) select:focus,
+.style-windows-fluent:not(.dark) select,
+.style-windows-fluent:not(.dark) select:focus,
+.style-frosted-glass:not(.dark) select,
+.style-frosted-glass:not(.dark) select:focus,
+.style-neo-brutalist:not(.dark) select,
+.style-neo-brutalist:not(.dark) select:focus,
+.style-minimalist:not(.dark) select,
+.style-minimalist:not(.dark) select:focus {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  color-scheme: light !important;
+}
+
+select option,
+select optgroup,
+html:not(.dark) select option,
+html:not(.dark) select optgroup,
+body:not(.dark) select option,
+body:not(.dark) select optgroup {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+}
+
+/* Dark mode: Black background with White text */
+html.dark select,
+html.dark select:focus,
+body.dark select,
+body.dark select:focus,
+.dark select,
+.dark select:focus,
+.style-windows-fluent.dark select,
+.style-windows-fluent.dark select:focus,
+.style-frosted-glass.dark select,
+.style-frosted-glass.dark select:focus,
+.style-neo-brutalist.dark select,
+.style-neo-brutalist.dark select:focus,
+.style-minimalist.dark select,
+.style-minimalist.dark select:focus,
+.style-cosmic-dark select,
+.style-cosmic-dark select:focus {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  color-scheme: dark !important;
+}
+
+html.dark select option,
+html.dark select optgroup,
+body.dark select option,
+body.dark select optgroup,
+.dark select option,
+.dark select optgroup,
+.style-windows-fluent.dark select option,
+.style-frosted-glass.dark select option,
+.style-neo-brutalist.dark select option,
+.style-minimalist.dark select option,
+.style-cosmic-dark select option,
+.style-cosmic-dark select optgroup {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}

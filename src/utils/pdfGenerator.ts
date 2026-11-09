@@ -1722,6 +1722,187 @@ export function generateGuiaRemisionPdf(gre: SunatGuiaRemision, shouldDownload: 
   }
 }
 
+/**
+ * Generates a formatted PDF Report of filtered Facturas (by Year, Month, Type, Status, or Teacher)
+ */
+export function generateFacturasReportPDF(
+  facturas: Factura[],
+  options: {
+    titulo?: string;
+    periodoLabel?: string;
+    filtroDetalle?: string;
+    docenteNombre?: string;
+    shouldDownload?: boolean;
+  } = {}
+): { id: string; base64: string } {
+  const doc = new jsPDF({
+    orientation: "landscape",
+    unit: "mm",
+    format: "a4"
+  });
+
+  const titulo = cleanText(options.titulo || "REPORTE DE FACTURAS Y COMPROBANTES ELECTRONICOS");
+  const periodo = cleanText(options.periodoLabel || "Mes Actual");
+  const subfiltro = cleanText(options.filtroDetalle || "Todos los tipos y estados");
+  const fechaReporte = new Date().toLocaleDateString("es-PE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  });
+
+  // Top Header Bar
+  doc.setFillColor(15, 23, 42);
+  doc.rect(0, 0, 297, 28, "F");
+
+  drawEnlaceCLogo(doc, 12, 5, 22, 16);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(255, 255, 255);
+  doc.text(titulo, 38, 12);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text(`Periodo Filtrado: ${periodo}   |   Filtros: ${subfiltro}`, 38, 18);
+  doc.text(
+    options.docenteNombre
+      ? `Docente: ${cleanText(options.docenteNombre)}   |   Fecha de Exportacion: ${fechaReporte}`
+      : `Institucion: COLEGIO / ACADEMIA ENLACEC   |   Fecha de Exportacion: ${fechaReporte}`,
+    38,
+    23.5
+  );
+
+  // Summary KPIs
+  const activas = facturas.filter(f => f.estado !== "anulada");
+  const totalFacturado = activas.reduce((acc, f) => acc + Number(f.monto || 0), 0);
+  const totalPagado = facturas.filter(f => f.estado === "pagada").reduce((acc, f) => acc + Number(f.monto || 0), 0);
+  const totalEmitido = facturas.filter(f => f.estado === "emitida").reduce((acc, f) => acc + Number(f.monto || 0), 0);
+
+  let y = 34;
+  const kpiBoxes = [
+    { label: "COMPROBANTES FILTRADOS", value: `${facturas.length} registros`, color: [79, 70, 229] },
+    { label: "TOTAL FACTURADO (ACTIVOS)", value: `S/. ${totalFacturado.toFixed(2)}`, color: [15, 23, 42] },
+    { label: "TOTAL PAGADO / COBRADO", value: `S/. ${totalPagado.toFixed(2)}`, color: [16, 185, 129] },
+    { label: "PENDIENTE / EMITIDA", value: `S/. ${totalEmitido.toFixed(2)}`, color: [217, 119, 6] }
+  ];
+
+  kpiBoxes.forEach((box, idx) => {
+    const x = 12 + idx * 69;
+    doc.setDrawColor(226, 232, 240);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(x, y, 65, 16, 2, 2, "FD");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text(box.label, x + 4, y + 6);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(box.color[0], box.color[1], box.color[2]);
+    doc.text(box.value, x + 4, y + 13);
+  });
+
+  y = 55;
+
+  const drawTableHeader = (topY: number) => {
+    doc.setFillColor(30, 41, 59);
+    doc.rect(12, topY, 273, 8, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text("SERIE / CORRELATIVO", 15, topY + 5.3);
+    doc.text("FECHA", 52, topY + 5.3);
+    doc.text("TIPO", 76, topY + 5.3);
+    doc.text("TITULAR / RECEPTOR", 104, topY + 5.3);
+    doc.text("CONCEPTO / DETALLE DE ASISTENCIA O MATRICULA", 158, topY + 5.3);
+    doc.text("ESTADO", 242, topY + 5.3);
+    doc.text("MONTO (S/.)", 282, topY + 5.3, { align: "right" });
+  };
+
+  drawTableHeader(y);
+  y += 8;
+
+  if (facturas.length === 0) {
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text("No existen comprobantes registrados para el año y mes seleccionados.", 148, y + 12, { align: "center" });
+  } else {
+    facturas.forEach((f, idx) => {
+      if (y > 186) {
+        doc.addPage();
+        y = 16;
+        drawTableHeader(y);
+        y += 8;
+      }
+
+      if (idx % 2 === 0) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(12, y, 273, 7.5, "F");
+      }
+
+      const isStudent = f.tipo === "estudiante";
+      const serieCorr =
+        f.detalles?.serieCorrelativo ||
+        (isStudent ? `B001-${String(idx + 1).padStart(6, "0")}` : `E001-${String(idx + 1).padStart(6, "0")}`);
+      const fechaStr = f.created_at
+        ? new Date(f.created_at).toLocaleDateString("es-PE", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric"
+          })
+        : "-";
+      const docNum =
+        f.detalles?.docClienteNumero ||
+        (isStudent ? f.detalles?.dniEstudiante : f.detalles?.dniDocente) ||
+        "-";
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(cleanText(serieCorr), 15, y + 5);
+
+      doc.setFont("helvetica", "normal");
+      doc.text(fechaStr, 52, y + 5);
+      doc.text(isStudent ? "Matricula" : "Asist. Docente", 76, y + 5);
+      doc.text(
+        `${cleanText(f.detalles?.nombrePersona || "-").substring(0, 20)} (${cleanText(String(docNum))})`,
+        104,
+        y + 5
+      );
+      doc.text(cleanText(f.concepto || "-").substring(0, 48), 158, y + 5);
+
+      doc.setFont("helvetica", "bold");
+      if (f.estado === "pagada") {
+        doc.setTextColor(16, 185, 129);
+      } else if (f.estado === "anulada") {
+        doc.setTextColor(225, 29, 72);
+      } else {
+        doc.setTextColor(217, 119, 6);
+      }
+      doc.text(cleanText(f.estado.toUpperCase()), 242, y + 5);
+
+      doc.setTextColor(15, 23, 42);
+      doc.text(`S/. ${Number(f.monto || 0).toFixed(2)}`, 282, y + 5, { align: "right" });
+
+      y += 7.5;
+    });
+  }
+
+  const reportId = `Reporte_Facturas_${periodo.replace(/\s+/g, "_")}`;
+  if (options.shouldDownload !== false) {
+    doc.save(`${reportId}.pdf`);
+  }
+
+  return {
+    id: reportId,
+    base64: doc.output("datauristring")
+  };
+}
+
+
 
 
 

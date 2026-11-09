@@ -20,6 +20,7 @@ import { VercelEnvConfigCard } from '../VercelEnvConfigCard';
 import { SkeletonSummaryCard } from '../Skeleton';
 import { 
   lookupReniecDniClient, 
+  ReniecDniResponse,
   generateDailySummaryClient, 
   uploadToCloudinaryClient 
 } from '../../services/clientServices';
@@ -48,6 +49,7 @@ import {
   Folder, 
   FileText, 
   Filter,
+  Calendar,
   TrendingUp, 
   TrendingDown, 
   ArrowUpRight, 
@@ -264,6 +266,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
 
   // Multi-selection states for student/teacher deletion with long press drag-and-drop trash bin
   const [financeTimeFilter, setFinanceTimeFilter] = useState<'all' | 'month' | 'week' | 'day'>('all');
+  const [financeSelectedMonth, setFinanceSelectedMonth] = useState<number>(() => new Date().getMonth() + 1);
+  const [financeTypeFilter, setFinanceTypeFilter] = useState<'todos' | 'ingreso' | 'egreso'>('todos');
+  const [financeCategoryFilter, setFinanceCategoryFilter] = useState<string>('todas');
+  const [financeSearchQuery, setFinanceSearchQuery] = useState<string>('');
   const [studentSelectionMode, setStudentSelectionMode] = useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   
@@ -285,6 +291,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
   const [isSearchingDni, setIsSearchingDni] = useState(false);
   const [dniSearchError, setDniSearchError] = useState('');
   const [sunatPadronData, setSunatPadronData] = useState<SunatPadronResult | null>(null);
+  const [reniecDniJson, setReniecDniJson] = useState<ReniecDniResponse | null>(null);
 
   // Finanzas SUNAT CPE Validator States
   const [showFinanceCpeValidator, setShowFinanceCpeValidator] = useState(false);
@@ -308,12 +315,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
     setExistingStudentData(null);
     setIsReniecAutofilled(false);
     setSunatPadronData(null);
+    setReniecDniJson(null);
 
     const cleanDni = cleanDoc;
 
     try {
       if (!isForTeacher && !isEdit) {
-        // FIRST: Search local state and Supabase database for existing student by DNI
+        // FIRST: Search local state and Supabase database for existing student by DNI (unless testing or creating new)
         let existingStudent = students.find(s => s.dni && String(s.dni).trim().replace(/\D/g, '') === cleanDni);
 
         if (!existingStudent) {
@@ -351,7 +359,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
           }
         }
 
-        if (existingStudent) {
+        if (existingStudent && matriculaMode === 'existente') {
           // Found existing student in Supabase/local state -> Auto-fill and ask for service
           console.log("✅ Estudiante existente identificado en Supabase:", existingStudent);
           setExistingStudentData(existingStudent);
@@ -373,57 +381,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
           return;
         }
 
-        if (matriculaMode === 'existente') {
+        if (matriculaMode === 'existente' && !existingStudent) {
           setDniSearchError(`No se encontró ningún estudiante registrado previamente con el DNI ${cleanDni} en la base de datos de Supabase.`);
           setIsSearchingDni(false);
           return;
         }
       }
 
-      // SECOND: Query SUNAT / RENIEC Padrón API (Validates Activo, Habido, and Régimen)
-      const padron = await consultarPadronSunat(cleanDni);
-      setSunatPadronData(padron);
+      let nombreVal = '';
+      let apellidoVal = '';
+      let resolvedDocNumber = cleanDni;
 
-      let nombreVal = (padron.nombres || '').trim();
-      let apellidoVal = (padron.apellidos || '').trim();
+      if (cleanDni.length === 8) {
+        // PRIMARY FOR 8-DIGIT DNI: Query Decolecta RENIEC API and get exact JSON structure:
+        // { first_name, first_last_name, second_last_name, full_name, document_number }
+        const dniJson = await lookupReniecDniClient(cleanDni);
+        setReniecDniJson(dniJson);
 
-      if (!nombreVal && padron.nombreRazonSocial) {
-        const parts = padron.nombreRazonSocial.split(' ');
-        if (parts.length >= 3) {
-          nombreVal = parts.slice(0, -2).join(' ');
-          apellidoVal = parts.slice(-2).join(' ');
-        } else {
-          nombreVal = padron.nombreRazonSocial;
-          apellidoVal = '';
+        nombreVal = (dniJson.first_name || '').trim();
+        apellidoVal = [dniJson.first_last_name, dniJson.second_last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+        resolvedDocNumber = (dniJson.document_number || cleanDni).trim();
+
+        // Also populate SUNAT Padrón metadata in parallel without overwriting the Decolecta JSON fields
+        try {
+          const padron = await consultarPadronSunat(cleanDni);
+          setSunatPadronData({
+            ...padron,
+            numero: resolvedDocNumber,
+            nombres: nombreVal,
+            apellidos: apellidoVal,
+            nombreRazonSocial: dniJson.full_name || `${ apellidoVal } ${ nombreVal }`.trim()
+          });
+        } catch (e) {
+          // Ignore padron secondary metadata error
         }
-      }
-
-      if (!nombreVal) {
-        const data = await lookupReniecDniClient(cleanDni);
-        const personObj = (data && typeof data === 'object' && data.data && typeof data.data === 'object') ? data.data : data;
-        nombreVal = (personObj.first_name || personObj.nombres || personObj.nombre || '').toString().trim();
-        const paterno = personObj.first_last_name || personObj.apellido_paterno || '';
-        const materno = personObj.second_last_name || personObj.apellido_materno || '';
-        apellidoVal = `${paterno} ${materno}`.trim() || (personObj.apellidos || '').toString().trim();
+      } else {
+        // 11-DIGIT RUC: Query SUNAT Padrón API
+        const padron = await consultarPadronSunat(cleanDni);
+        setSunatPadronData(padron);
+        nombreVal = (padron.nombres || padron.nombreRazonSocial || '').trim();
+        apellidoVal = (padron.apellidos || '').trim();
       }
 
       setIsReniecAutofilled(true);
 
-      // Update form fields with SUNAT/RENIEC API response
+      // Update form fields with Decolecta RENIEC JSON response
       if (isForTeacher) {
         if (isEdit) {
           setEditTeacherData(prev => ({
             ...prev,
             nombre: nombreVal,
             apellido: apellidoVal,
-            dni: cleanDni
+            dni: resolvedDocNumber
           }));
         } else {
           setNewTeacherData(prev => ({
             ...prev,
             nombre: nombreVal,
             apellido: apellidoVal,
-            dni: cleanDni
+            dni: resolvedDocNumber
           }));
         }
       } else {
@@ -432,14 +451,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
             ...prev,
             nombre: nombreVal,
             apellido: apellidoVal,
-            dni: cleanDni
+            dni: resolvedDocNumber
           }));
         } else {
           setNewStudentData(prev => ({
             ...prev,
             nombre: nombreVal,
             apellido: apellidoVal,
-            dni: cleanDni
+            dni: resolvedDocNumber
           }));
           setDniStepCompleted(true);
         }
@@ -3240,6 +3259,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                           </button>
                         </div>
 
+                        {matriculaMode === 'nuevo' && (
+                          <div className="flex items-center justify-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewStudentData({ ...newStudentData, dni: '46027897' });
+                                handleLookupDni('46027897', false);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 text-[10px] font-mono font-bold border border-indigo-200/60 dark:border-indigo-800/50 transition-colors cursor-pointer"
+                            >
+                              Probar DNI: 46027897 (ROXANA KARINA DELGADO HUAMANI)
+                            </button>
+                          </div>
+                        )}
+
                         {dniSearchError && (
                           <div className="p-2.5 bg-rose-500/10 dark:bg-rose-950/40 rounded-xl border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[10px] font-semibold text-center leading-relaxed">
                             {dniSearchError}
@@ -3272,7 +3306,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                     </div>
                   ) : (
                     <>
-                      {/* STEP 2: FULL FORM DISPLAY WITH AUTOFILLED BADGE */}
+                      {/* STEP 2: FULL FORM DISPLAY WITH DECOLECTA RENIEC JSON STRUCTURE */}
                       {matriculaMode === 'manual' ? (
                         <div className="p-3 bg-indigo-50 dark:bg-zinc-800 rounded-xl border border-indigo-200 dark:border-zinc-700">
                           <label className="block text-[11px] font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide mb-1">DNI del Estudiante (8 Dígitos)</label>
@@ -3280,7 +3314,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                             required
                             type="text"
                             maxLength={8}
-                            placeholder="Ej. 74839201"
+                            placeholder="Ej. 46027897"
                             value={newStudentData.dni || ''}
                             onChange={(e) => setNewStudentData({ ...newStudentData, dni: e.target.value.replace(/\D/g, '') })}
                             className={`w-full p-2 py-2.5 text-xs bg-white dark:bg-zinc-900 border border-indigo-300 dark:border-zinc-700 text-gray-900 dark:text-white rounded-xl outline-none font-mono font-bold tracking-wider ${cl.ring}`}
@@ -3312,13 +3346,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                           </button>
                         </div>
                       ) : (
-                        <div className="flex flex-col gap-1.5 p-3 bg-indigo-500/5 dark:bg-indigo-500/10 rounded-xl border border-indigo-500/15">
+                        <div className="flex flex-col gap-2 p-3 bg-indigo-500/5 dark:bg-indigo-500/10 rounded-xl border border-indigo-500/20">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <CheckCircle className="w-4 h-4 text-indigo-500" />
+                              <CheckCircle className="w-4 h-4 text-emerald-500" />
                               <div className="text-left">
-                                <span className="block text-[9px] font-extrabold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Padrón SUNAT / RENIEC Consultado</span>
-                                <span className="text-xs font-bold text-gray-800 dark:text-zinc-200 font-mono">Doc: {newStudentData.dni || 'No registrado'}</span>
+                                <span className="block text-[9px] font-extrabold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+                                  API RENIEC / Decolecta — Estructura JSON Obtenida
+                                </span>
+                                <span className="text-xs font-bold text-gray-800 dark:text-zinc-200 font-mono">
+                                  document_number: {reniecDniJson?.document_number || newStudentData.dni || 'No registrado'}
+                                </span>
                               </div>
                             </div>
                             <button
@@ -3326,20 +3364,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                               onClick={() => {
                                 setDniStepCompleted(false);
                                 setIsReniecAutofilled(false);
+                                setReniecDniJson(null);
                                 setDniSearchError('');
                               }}
                               className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
                             >
-                              Consultar otro DNI/RUC
+                              Consultar otro DNI
                             </button>
                           </div>
-                          {sunatPadronData && (
-                            <div className="text-[10px] text-gray-600 dark:text-zinc-300 pt-1 border-t border-indigo-500/10 flex flex-wrap gap-x-2">
-                              <span>Estado: <strong className="text-emerald-600 dark:text-emerald-400">{sunatPadronData.estado}</strong></span>
-                              <span>·</span>
-                              <span>Condición: <strong className="text-emerald-600 dark:text-emerald-400">{sunatPadronData.condicion}</strong></span>
-                              <span>·</span>
-                              <span>Régimen: <strong>{sunatPadronData.regimen}</strong></span>
+
+                          {reniecDniJson && (
+                            <div className="space-y-2 pt-1.5 border-t border-indigo-500/15 text-left">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px]">
+                                <div className="bg-white/80 dark:bg-zinc-900/80 px-2 py-1 rounded-lg border border-gray-200/70 dark:border-zinc-700">
+                                  <span className="block text-[8px] font-mono uppercase text-gray-400">first_name</span>
+                                  <strong className="text-gray-900 dark:text-white font-mono">{reniecDniJson.first_name}</strong>
+                                </div>
+                                <div className="bg-white/80 dark:bg-zinc-900/80 px-2 py-1 rounded-lg border border-gray-200/70 dark:border-zinc-700">
+                                  <span className="block text-[8px] font-mono uppercase text-gray-400">first_last_name</span>
+                                  <strong className="text-gray-900 dark:text-white font-mono">{reniecDniJson.first_last_name}</strong>
+                                </div>
+                                <div className="bg-white/80 dark:bg-zinc-900/80 px-2 py-1 rounded-lg border border-gray-200/70 dark:border-zinc-700 col-span-2 sm:col-span-1">
+                                  <span className="block text-[8px] font-mono uppercase text-gray-400">second_last_name</span>
+                                  <strong className="text-gray-900 dark:text-white font-mono">{reniecDniJson.second_last_name}</strong>
+                                </div>
+                              </div>
+                              <div className="bg-white/80 dark:bg-zinc-900/80 px-2.5 py-1.5 rounded-lg border border-gray-200/70 dark:border-zinc-700 text-[10px] flex items-center justify-between gap-2">
+                                <div>
+                                  <span className="text-[8px] font-mono uppercase text-gray-400 mr-1.5">full_name:</span>
+                                  <strong className="text-indigo-600 dark:text-indigo-400 font-mono">{reniecDniJson.full_name}</strong>
+                                </div>
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold">
+                                  DNI {reniecDniJson.document_number}
+                                </span>
+                              </div>
+                              <pre className="p-2 rounded-lg bg-zinc-950 text-emerald-400 font-mono text-[9px] overflow-x-auto leading-tight border border-zinc-800">
+{JSON.stringify(
+  {
+    first_name: reniecDniJson.first_name,
+    first_last_name: reniecDniJson.first_last_name,
+    second_last_name: reniecDniJson.second_last_name,
+    full_name: reniecDniJson.full_name,
+    document_number: reniecDniJson.document_number
+  },
+  null,
+  2
+)}
+                              </pre>
                             </div>
                           )}
                         </div>
@@ -3348,17 +3419,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <div className="flex items-center justify-between mb-1">
-                            <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide">Nombre</label>
+                            <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide">
+                              Nombres (first_name)
+                            </label>
                             {(isReniecAutofilled || existingStudentData) && (
                               <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-extrabold flex items-center gap-1">
-                                <CheckCircle2 className="w-2.5 h-2.5" /> RENIEC / DB
+                                <CheckCircle2 className="w-2.5 h-2.5" /> API DNI
                               </span>
                             )}
                           </div>
                           <input
                             required
                             type="text"
-                            placeholder="Ej. Sofía"
+                            placeholder="Ej. ROXANA KARINA"
                             disabled={isReniecAutofilled || !!existingStudentData}
                             value={newStudentData.nombre}
                             onChange={(e) => setNewStudentData({ ...newStudentData, nombre: e.target.value })}
@@ -3371,17 +3444,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                         </div>
                         <div>
                           <div className="flex items-center justify-between mb-1">
-                            <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide">Apellido</label>
+                            <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide">
+                              Apellidos (first & second_last_name)
+                            </label>
                             {(isReniecAutofilled || existingStudentData) && (
                               <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-extrabold flex items-center gap-1">
-                                <CheckCircle2 className="w-2.5 h-2.5" /> RENIEC / DB
+                                <CheckCircle2 className="w-2.5 h-2.5" /> API DNI
                               </span>
                             )}
                           </div>
                           <input
                             required
                             type="text"
-                            placeholder="Ej. Valentino"
+                            placeholder="Ej. DELGADO HUAMANI"
                             disabled={isReniecAutofilled || !!existingStudentData}
                             value={newStudentData.apellido}
                             onChange={(e) => setNewStudentData({ ...newStudentData, apellido: e.target.value })}
@@ -4081,16 +4156,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
           <button
             type="button"
             onClick={() => setDocenteSubTab('lista')}
-            className={`px-5 py-2.5 text-xs font-bold transition-all border-b-2 ${docenteSubTab === 'lista' ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-750 dark:text-zinc-400'}`}
+            className={`px-5 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer ${docenteSubTab === 'lista' ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-750 dark:text-zinc-400'}`}
           >
             Directorio de Docentes
           </button>
           <button
             type="button"
             onClick={() => setDocenteSubTab('asistencias')}
-            className={`px-5 py-2.5 text-xs font-bold transition-all border-b-2 ${docenteSubTab === 'asistencias' ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-750 dark:text-zinc-400'}`}
+            className={`px-5 py-2.5 text-xs font-bold transition-all border-b-2 flex items-center gap-2 cursor-pointer ${docenteSubTab === 'asistencias' ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-750 dark:text-zinc-400'}`}
           >
-            Bitácora de Asistencias y Pagos
+            <span>Bitácora de Asistencias y Aprobación para Facturas</span>
+            {attendance.filter(a => a.estado === null || a.estado === undefined).length > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black font-mono">
+                {attendance.filter(a => a.estado === null || a.estado === undefined).length} por aprobar
+              </span>
+            )}
           </button>
         </div>
 
@@ -4699,16 +4779,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
           <div className="bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-gray-150 dark:border-zinc-800 shadow-sm space-y-6 animate-fade-in">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-gray-100 dark:border-zinc-850 pb-4">
               <div>
-                <h3 className="text-sm font-bold text-gray-800 dark:text-zinc-200">Control de Sesiones y Honorarios</h3>
-                <p className="text-xs text-gray-500">Visualiza la bitácora de clases dictadas por los docentes con su compensación respectiva</p>
+                <h3 className="text-sm font-bold text-gray-800 dark:text-zinc-200">
+                  Aprobación de Asistencias Registradas por Profesores
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Al aprobar una asistencia, se genera automáticamente su factura/recibo (<code className="font-mono font-bold">E001</code>) en las <strong>Facturas del Sistema</strong> y en las <strong>Facturas Personales del Profesor</strong>.
+                </p>
               </div>
               
-              {/* Quick Summary Cards */}
-              <div className="flex gap-4">
+              {/* Quick Summary Cards + Approve All Button */}
+              <div className="flex flex-wrap items-center gap-3">
+                {attendance.filter(a => a.estado === null || a.estado === undefined).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const pending = attendance.filter(a => a.estado === null || a.estado === undefined);
+                      for (const item of pending) {
+                        await updateAttendanceStatus(item.id, true);
+                      }
+                    }}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>
+                      Aprobar Todas las Pendientes ({attendance.filter(a => a.estado === null || a.estado === undefined).length})
+                    </span>
+                  </button>
+                )}
                 <div className="px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100/50 dark:border-emerald-900/30 rounded-xl">
                   <span className="block text-[9px] text-gray-450 uppercase font-bold">Total Devengado</span>
                   <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-                    S/. {attendance.reduce((sum, item) => sum + (Number(item.monto) || 0), 0).toFixed(2)}
+                    S/. {attendance.reduce((sum, item) => sum + (Number(item.monto) || (Number(item.cantidadSesiones) || 1) * 150), 0).toFixed(2)}
                   </span>
                 </div>
                 <div className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-100/50 dark:border-indigo-900/30 rounded-xl">
@@ -4876,20 +4977,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                           {att.cantidadSesiones || 1}
                         </td>
                         <td className="px-4 py-3.5 text-right font-extrabold font-mono text-emerald-600 dark:text-emerald-400">
-                          S/. {(Number(att.monto) || 0).toFixed(2)}
+                          S/. {(Number(att.monto) > 0 ? Number(att.monto) : (Number(att.cantidadSesiones) || 1) * 150).toFixed(2)}
                         </td>
                         <td className="px-4 py-3.5 text-center">
                           {att.estado === true || (att.estado as any) === 'ACEPTADO' || (att.estado as any) === 'Aceptado' ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-200/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30">
-                              Aceptado
+                              Aprobada y Facturada
                             </span>
                           ) : att.estado === false || (att.estado as any) === 'RECHAZADO' || (att.estado as any) === 'Rechazado' ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200/50 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30">
-                              Rechazado
+                              Rechazada
                             </span>
                           ) : (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-200/50 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30">
-                              En Proceso
+                              Pendiente Aprobación
                             </span>
                           )}
                         </td>
@@ -4911,7 +5012,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                                   : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white cursor-pointer'
                               }`}
                             >
-                              {att.estado === true ? '✓ Aprobado' : 'Aceptar'}
+                              {att.estado === true ? '✓ En Facturas' : 'Aprobar y Facturar'}
                             </button>
                             <button
                               type="button"
@@ -4929,7 +5030,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                                   : 'bg-rose-600 hover:bg-rose-700 active:scale-95 text-white cursor-pointer'
                               }`}
                             >
-                              {att.estado === false ? '✕ Rechazado' : 'Rechazar'}
+                              {att.estado === false ? '✕ Rechazada' : 'Rechazar'}
                             </button>
                           </div>
                         </td>
@@ -5835,28 +5936,91 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
      MODULE: FINANZAS (CASH FLOW REGISTER + DEPOSITS / WITHDRAWAL - REQUISITO)
      ========================================================================= */
   const renderFinanzasValue = () => {
-    // Filter transactions by selected time period
+    const FINANCE_MONTH_NAMES: Record<number, string> = {
+      1: 'Enero',
+      2: 'Febrero',
+      3: 'Marzo',
+      4: 'Abril',
+      5: 'Mayo',
+      6: 'Junio',
+      7: 'Julio',
+      8: 'Agosto',
+      9: 'Septiembre',
+      10: 'Octubre',
+      11: 'Noviembre',
+      12: 'Diciembre'
+    };
+
     const now = new Date();
+    const currentMonthNum = now.getMonth() + 1;
+
+    const availableCategories = Array.from(
+      new Set([
+        'Colegiatura',
+        'Salario Docente',
+        'Material Educativo',
+        'Servicios',
+        'Otros',
+        ...transactions.map(t => t.category).filter(Boolean)
+      ])
+    );
+
+    // Filter transactions by selected time period, chosen month, movement type, category, and search query
     const filteredTransactions = transactions.filter(tx => {
+      // 1. Search by concept
+      if (financeSearchQuery.trim() !== '') {
+        const q = financeSearchQuery.toLowerCase();
+        const matchConcept = (tx.concept || '').toLowerCase().includes(q);
+        const matchCat = (tx.category || '').toLowerCase().includes(q);
+        const matchTipo = (tx.tipo || '').toLowerCase().includes(q);
+        if (!matchConcept && !matchCat && !matchTipo) return false;
+      }
+
+      // 2. Filter by movement type (ingreso / egreso)
+      if (financeTypeFilter !== 'todos' && tx.type !== financeTypeFilter) {
+        return false;
+      }
+
+      // 3. Filter by category
+      if (financeCategoryFilter !== 'todas' && tx.category !== financeCategoryFilter) {
+        return false;
+      }
+
+      // 4. Filter by time period / chosen month
       if (financeTimeFilter === 'all') return true;
       if (!tx.date) return false;
-      
-      const txDate = new Date(tx.date + (tx.date.includes('T') ? '' : 'T00:00:00'));
-      if (isNaN(txDate.getTime())) return false;
+
+      const rawDateStr = String(tx.date).trim();
+      const txDate = new Date(rawDateStr + (rawDateStr.includes('T') ? '' : 'T12:00:00'));
+
+      // Extract month (1-12) reliably from YYYY-MM-DD or Date object
+      let txMonth = !isNaN(txDate.getTime()) ? txDate.getMonth() + 1 : 0;
+      const parts = rawDateStr.split('T')[0].split('-');
+      if (parts.length >= 2 && !isNaN(Number(parts[1]))) {
+        txMonth = Number(parts[1]);
+      }
 
       if (financeTimeFilter === 'day') {
+        if (isNaN(txDate.getTime())) return false;
         return txDate.toDateString() === now.toDateString();
       }
       if (financeTimeFilter === 'week') {
+        if (isNaN(txDate.getTime())) return false;
         const diffMs = Math.abs(now.getTime() - txDate.getTime());
         const diffDays = diffMs / (1000 * 60 * 60 * 24);
         return diffDays <= 7;
       }
       if (financeTimeFilter === 'month') {
-        return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+        return txMonth === financeSelectedMonth;
       }
       return true;
     });
+
+    const hasActiveMovementFilters =
+      financeTimeFilter !== 'all' ||
+      financeTypeFilter !== 'todos' ||
+      financeCategoryFilter !== 'todas' ||
+      financeSearchQuery.trim() !== '';
 
     const filteredIngresos = filteredTransactions.filter(t => t.type === 'ingreso').reduce((a, b) => a + b.amount, 0);
     const filteredEgresos = filteredTransactions.filter(t => t.type === 'egreso').reduce((a, b) => a + b.amount, 0);
@@ -5865,57 +6029,155 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
     return (
       <div className="space-y-6">
         
-        {/* Time Period Filter Bar */}
-        <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-indigo-500" />
-            <span className="text-xs font-bold text-gray-800 dark:text-zinc-200">Filtrar Movimientos por Periodo:</span>
+        {/* Time Period & Movement Filter Bar */}
+        <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm space-y-3.5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-indigo-500" />
+              <span className="text-xs font-bold text-gray-800 dark:text-zinc-200">
+                Filtrar Movimientos por Periodo y Mes:
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 bg-gray-100 dark:bg-zinc-800 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setFinanceTimeFilter('all')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  financeTimeFilter === 'all'
+                    ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                    : 'text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200'
+                }`}
+              >
+                Todos los Registros ({transactions.length})
+              </button>
+
+              {/* Selector de Mes ubicado exactamente donde estaba "Este Mes" */}
+              <div
+                onClick={() => {
+                  if (financeTimeFilter !== 'month') {
+                    setFinanceTimeFilter('month');
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                  financeTimeFilter === 'month'
+                    ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-indigo-500/30'
+                    : 'text-gray-600 dark:text-zinc-300 hover:bg-white/60 dark:hover:bg-zinc-700/50'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                <select
+                  value={financeSelectedMonth}
+                  onChange={(e) => {
+                    setFinanceSelectedMonth(Number(e.target.value));
+                    setFinanceTimeFilter('month');
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (financeTimeFilter !== 'month') {
+                      setFinanceTimeFilter('month');
+                    }
+                  }}
+                  className="bg-white text-black dark:bg-black dark:text-white px-2 py-0.5 rounded-md border border-gray-200 dark:border-zinc-700 text-xs font-bold focus:outline-none cursor-pointer"
+                  title="Escoger mes para filtrar movimientos"
+                >
+                  {Object.entries(FINANCE_MONTH_NAMES).map(([numStr, name]) => {
+                    const mNum = Number(numStr);
+                    const isCurrent = mNum === currentMonthNum;
+                    return (
+                      <option key={mNum} value={mNum} className="bg-white text-black dark:bg-black dark:text-white">
+                        {isCurrent ? `Este Mes (${name})` : `Mes: ${name}`}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setFinanceTimeFilter('week')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  financeTimeFilter === 'week'
+                    ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                    : 'text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200'
+                }`}
+              >
+                Esta Semana
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinanceTimeFilter('day')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  financeTimeFilter === 'day'
+                    ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                    : 'text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200'
+                }`}
+              >
+                Hoy / Día
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-zinc-800 p-1 rounded-xl">
-            <button
-              type="button"
-              onClick={() => setFinanceTimeFilter('all')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                financeTimeFilter === 'all'
-                  ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                  : 'text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200'
-              }`}
-            >
-              Todos los Registros ({transactions.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setFinanceTimeFilter('month')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                financeTimeFilter === 'month'
-                  ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                  : 'text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200'
-              }`}
-            >
-              Este Mes
-            </button>
-            <button
-              type="button"
-              onClick={() => setFinanceTimeFilter('week')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                financeTimeFilter === 'week'
-                  ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                  : 'text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200'
-              }`}
-            >
-              Esta Semana
-            </button>
-            <button
-              type="button"
-              onClick={() => setFinanceTimeFilter('day')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                financeTimeFilter === 'day'
-                  ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                  : 'text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200'
-              }`}
-            >
-              Hoy / Día
-            </button>
+
+          {/* Row 2: Movement Filters (Search concept, Movement Type Ingreso/Egreso, Category) */}
+          <div className="pt-3 border-t border-gray-100 dark:border-zinc-800/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 items-center">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={financeSearchQuery}
+                onChange={(e) => setFinanceSearchQuery(e.target.value)}
+                placeholder="Buscar movimiento por concepto..."
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl text-gray-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl px-2.5 py-1.5">
+              <span className="text-[10px] font-extrabold uppercase text-gray-400 whitespace-nowrap">Tipo:</span>
+              <select
+                value={financeTypeFilter}
+                onChange={(e) => setFinanceTypeFilter(e.target.value as 'todos' | 'ingreso' | 'egreso')}
+                className="w-full bg-white text-black dark:bg-black dark:text-white px-2 py-1 rounded-md border border-gray-200 dark:border-zinc-700 text-xs font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="todos" className="bg-white text-black dark:bg-black dark:text-white">Todos los Movimientos</option>
+                <option value="ingreso" className="bg-white text-black dark:bg-black dark:text-white">Solo Ingresos (+ Entradas)</option>
+                <option value="egreso" className="bg-white text-black dark:bg-black dark:text-white">Solo Egresos (- Salidas)</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl px-2.5 py-1.5">
+              <span className="text-[10px] font-extrabold uppercase text-gray-400 whitespace-nowrap">Categoría:</span>
+              <select
+                value={financeCategoryFilter}
+                onChange={(e) => setFinanceCategoryFilter(e.target.value)}
+                className="w-full bg-white text-black dark:bg-black dark:text-white px-2 py-1 rounded-md border border-gray-200 dark:border-zinc-700 text-xs font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="todas" className="bg-white text-black dark:bg-black dark:text-white">Todas las Categorías</option>
+                {availableCategories.map(cat => (
+                  <option key={cat} value={cat} className="bg-white text-black dark:bg-black dark:text-white">{cat}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between sm:justify-end gap-2">
+              <span className="text-[11px] text-gray-500 dark:text-zinc-400 font-semibold">
+                Mostrando <strong>{filteredTransactions.length}</strong> de {transactions.length}
+              </span>
+              {hasActiveMovementFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFinanceTimeFilter('all');
+                    setFinanceSelectedMonth(currentMonthNum);
+                    setFinanceTypeFilter('todos');
+                    setFinanceCategoryFilter('todas');
+                    setFinanceSearchQuery('');
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400 text-[11px] font-bold hover:bg-rose-100 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Limpiar Filtros
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -5923,7 +6185,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-2xl text-white shadow-md relative overflow-hidden">
             <h4 className="text-xs uppercase font-bold tracking-widest text-white/70">
-              Saldo Escolar ({financeTimeFilter === 'all' ? 'Neto Total' : financeTimeFilter === 'month' ? 'Del Mes' : financeTimeFilter === 'week' ? 'De la Semana' : 'De Hoy'})
+              Saldo Escolar ({financeTimeFilter === 'all' ? 'Neto Total' : financeTimeFilter === 'month' ? `Mes de ${FINANCE_MONTH_NAMES[financeSelectedMonth]}` : financeTimeFilter === 'week' ? 'De la Semana' : 'De Hoy'})
             </h4>
             <h2 className="text-3xl font-extrabold mt-1 leading-none tracking-tight">S/. {filteredSaldo.toLocaleString('es-ES')}</h2>
             <p className="text-[10px] text-white/80 mt-2 font-medium">
@@ -7985,6 +8247,69 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                       </div>
                     );
                   })()}
+
+                  {/* Asistencias Registradas por este Docente (con aprobación directa para Facturas) */}
+                  <div className="col-span-2 pt-3 border-t border-gray-100 dark:border-zinc-850/50 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-gray-450 dark:text-zinc-500 uppercase tracking-wider">
+                        Asistencias Registradas ({attendance.filter(a => a.teacherId === selectedTeacher.id || a.teacherName === selectedTeacher.name).length})
+                      </span>
+                      <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold">
+                        Aprobar genera factura en Sistema + Profesor
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {attendance
+                        .filter(a => a.teacherId === selectedTeacher.id || a.teacherName === selectedTeacher.name)
+                        .map(att => {
+                          const isApproved = att.estado === true || (att.estado as any) === 'ACEPTADO';
+                          const isRejected = att.estado === false || (att.estado as any) === 'RECHAZADO';
+                          const monto = Number(att.monto) > 0 ? Number(att.monto) : (Number(att.cantidadSesiones) || 1) * 150;
+                          return (
+                            <div
+                              key={att.id}
+                              className="flex items-center justify-between gap-2 p-2 rounded-xl bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800 text-[11px]"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-bold text-gray-800 dark:text-zinc-200 truncate">
+                                  {att.course} · <span className="font-mono text-[10px] text-gray-400">{att.date}</span>
+                                </p>
+                                <p className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                                  S/. {monto.toFixed(2)} ({att.cantidadSesiones || 1} sesión)
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={isApproved}
+                                  onClick={() => updateAttendanceStatus(att.id, true)}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                                    isApproved
+                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 cursor-default'
+                                      : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                                  }`}
+                                >
+                                  {isApproved ? '✓ Facturada' : 'Aprobar y Facturar'}
+                                </button>
+                                {!isApproved && (
+                                  <button
+                                    type="button"
+                                    disabled={isRejected}
+                                    onClick={() => updateAttendanceStatus(att.id, false)}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400 cursor-pointer"
+                                  >
+                                    {isRejected ? 'Rechazada' : 'Rechazar'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      {attendance.filter(a => a.teacherId === selectedTeacher.id || a.teacherName === selectedTeacher.name).length === 0 && (
+                        <p className="text-[10px] text-gray-400 italic">Este docente aún no registra asistencias.</p>
+                      )}
+                    </div>
+                  </div>
 
                 </div>
 
