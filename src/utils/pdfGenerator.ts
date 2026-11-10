@@ -1399,27 +1399,44 @@ export function generateSunatElectronicPdf(
   );
   const esSandbox = det.modoTributario !== "interno_sin_ruc";
 
-  // Top Institution Branding Left
-  drawEnlaceCLogo(doc, 12, 12, 26, 19);
+  // 1. Top Institution Branding Left (máximo ancho 88mm para no colisionar con el cuadro de RUC a la derecha)
+  drawEnlaceCLogo(doc, 12, 11, 24, 18);
+  
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
+  doc.setFontSize(10.5);
   doc.setTextColor(15, 23, 42);
-  doc.text(razonSocialEmisor.substring(0, 38), 41, 18);
+  const emisorTitleLines = doc.splitTextToSize(razonSocialEmisor, 88);
+  let emisorY = 16;
+  emisorTitleLines.forEach((line: string) => {
+    doc.text(line, 39, emisorY);
+    emisorY += 4.5;
+  });
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
-  doc.text("INSTITUCION EDUCATIVA Y LABORATORIO DE CIENCIAS ENLACEC", 41, 23);
-  doc.text("Direccion Fiscal: Av. Garcilaso de la Vega 1472 - Lima - Peru", 41, 27.5);
-  doc.text(
-    esSandbox
-      ? "Entorno: HOMOLOGACION / SANDBOX BETA SUNAT (RUC PRUEBAS)"
-      : "Entorno: CONTROL ADMINISTRATIVO INTERNO (SIN RUC TRIBUTARIO)",
-    41,
-    32
-  );
+  const subInstLines = doc.splitTextToSize("INSTITUCION EDUCATIVA Y LABORATORIO DE CIENCIAS ENLACEC", 88);
+  subInstLines.forEach((line: string) => {
+    doc.text(line, 39, emisorY);
+    emisorY += 3.8;
+  });
 
-  // Official SUNAT RUC Box on Top Right
+  const dirLines = doc.splitTextToSize("Direccion Fiscal: Av. Garcilaso de la Vega 1472 - Lima - Peru", 88);
+  dirLines.forEach((line: string) => {
+    doc.text(line, 39, emisorY);
+    emisorY += 3.8;
+  });
+
+  const entornoStr = esSandbox
+    ? "Entorno: HOMOLOGACION / SANDBOX BETA SUNAT (RUC PRUEBAS)"
+    : "Entorno: CONTROL ADMINISTRATIVO INTERNO (SIN RUC TRIBUTARIO)";
+  const entLines = doc.splitTextToSize(entornoStr, 88);
+  entLines.forEach((line: string) => {
+    doc.text(line, 39, emisorY);
+    emisorY += 3.8;
+  });
+
+  // 2. Official SUNAT RUC Box on Top Right (x = 132 a 198)
   doc.setDrawColor(15, 23, 42);
   doc.setLineWidth(0.6);
   doc.roundedRect(132, 11, 66, 26, 2, 2, "S");
@@ -1432,20 +1449,22 @@ export function generateSunatElectronicPdf(
   doc.setTextColor(15, 23, 42);
   doc.text(`R.U.C. ${rucEmisor}`, 165, 16.5, { align: "center" });
 
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(30, 58, 138);
-  doc.text(tipoNombre.substring(0, 32), 165, 24.5, { align: "center" });
+  const tipoLines = doc.splitTextToSize(tipoNombre, 62);
+  if (tipoLines.length > 1) {
+    doc.text(tipoLines[0], 165, 22.5, { align: "center" });
+    doc.text(tipoLines[1], 165, 26.5, { align: "center" });
+  } else {
+    doc.text(tipoNombre, 165, 24.5, { align: "center" });
+  }
 
   doc.setFontSize(10.5);
   doc.setTextColor(15, 23, 42);
   doc.text(serieCorrelativo, 165, 34, { align: "center" });
 
-  // Customer & Tax Padrón Box
-  let y = 44;
-  doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(12, y, 186, 30, 2, 2, "S");
-
+  // 3. Customer & Tax Padrón Box (todo el texto que sobresalga va en salto de línea debajo)
+  let y = 43;
   const docNum = det.docClienteNumero || det.dniEstudiante || det.dniDocente || "00000000";
   const docLabel = det.docClienteTipo === "6" || docNum.length === 11 ? "RUC" : "DNI";
   const fechaStr = new Date(factura.created_at || Date.now()).toLocaleDateString("es-PE", {
@@ -1454,50 +1473,98 @@ export function generateSunatElectronicPdf(
     day: "2-digit"
   });
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.setTextColor(71, 85, 105);
-  doc.text("SENOR(ES) / RAZON SOCIAL:", 16, y + 6.5);
-  doc.text(`${docLabel} DEL RECEPTOR:`, 16, y + 12.5);
-  doc.text("DIRECCION:", 16, y + 18.5);
-  doc.text("PADRON SUNAT:", 16, y + 24.5);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  const nombreReceptor = cleanText(det.nombrePersona || "CLIENTE GENERAL");
+  const nombreLines = doc.splitTextToSize(nombreReceptor, 68);
+  const dirClienteLines = doc.splitTextToSize(cleanText(det.direccionCliente || "LIMA - PERU"), 68);
+  const metodoPagoLines = doc.splitTextToSize(cleanText(det.metodoPago || "Efectivo / Transferencia"), 38);
+  const regimenLines = doc.splitTextToSize(cleanText(det.regimenContribuyente || "General / Educacion"), 38);
 
-  doc.text("FECHA DE EMISION:", 128, y + 6.5);
-  doc.text("MONEDA:", 128, y + 12.5);
-  doc.text("MEDIO DE PAGO:", 128, y + 18.5);
-  doc.text("REGIMEN:", 128, y + 24.5);
+  const extraHeight = Math.max(0, (nombreLines.length - 1) * 3.5, (dirClienteLines.length - 1) * 3.5);
+  const padronBoxHeight = 31 + extraHeight;
+
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(12, y, 186, padronBoxHeight, 2, 2, "S");
+
+  // Columna Izquierda: Etiquetas (clarificadas, sin grises apagados)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text("SENOR(ES) / RAZON SOCIAL:", 15, y + 6);
+  doc.text(`${docLabel} DEL RECEPTOR:`, 15, y + 12.5 + (nombreLines.length > 1 ? 3.5 : 0));
+  doc.text("DIRECCION:", 15, y + 18.5 + (nombreLines.length > 1 ? 3.5 : 0));
+  doc.text("PADRON SUNAT:", 15, y + 24.5 + extraHeight);
+
+  // Columna Izquierda: Valores con salto de línea si sobresalen
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(15, 23, 42);
+  let curY = y + 6;
+  nombreLines.forEach((l: string, idx: number) => {
+    doc.text(l, 56, curY);
+    if (idx < nombreLines.length - 1) curY += 3.5;
+  });
+
+  const nextY1 = y + 12.5 + (nombreLines.length > 1 ? 3.5 : 0);
+  doc.text(cleanText(docNum), 56, nextY1);
+
+  let dirY = y + 18.5 + (nombreLines.length > 1 ? 3.5 : 0);
+  dirClienteLines.forEach((l: string, idx: number) => {
+    doc.text(l, 56, dirY);
+    if (idx < dirClienteLines.length - 1) dirY += 3.5;
+  });
+
+  doc.text(
+    cleanText(`${det.estadoContribuyente || "ACTIVO"} / ${det.condicionContribuyente || "HABIDO"}`),
+    56,
+    y + 24.5 + extraHeight
+  );
+
+  // Columna Derecha: Etiquetas y Valores (clarificados sin grises)
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(15, 23, 42);
+  doc.text("FECHA DE EMISION:", 126, y + 6);
+  doc.text("MONEDA:", 126, y + 12.5);
+  doc.text("MEDIO DE PAGO:", 126, y + 18.5);
+  doc.text("REGIMEN:", 126, y + 24.5);
 
   doc.setFont("helvetica", "normal");
   doc.setTextColor(15, 23, 42);
-  doc.text(cleanText(det.nombrePersona || "CLIENTE GENERAL").substring(0, 42), 58, y + 6.5);
-  doc.text(cleanText(docNum), 58, y + 12.5);
-  doc.text(cleanText(det.direccionCliente || "LIMA - PERU").substring(0, 42), 58, y + 18.5);
-  doc.text(
-    cleanText(`${det.estadoContribuyente || "ACTIVO"} / ${det.condicionContribuyente || "HABIDO"}`),
-    58,
-    y + 24.5
-  );
-
-  doc.text(fechaStr, 158, y + 6.5);
+  doc.text(fechaStr, 158, y + 6);
   doc.text("SOLES (PEN)", 158, y + 12.5);
-  doc.text(cleanText(det.metodoPago || "Transferencia / Contado").substring(0, 22), 158, y + 18.5);
-  doc.text(cleanText(det.regimenContribuyente || "General / Educacion").substring(0, 22), 158, y + 24.5);
+  
+  // Medio de pago sin truncar (salto de línea debajo)
+  let mpY = y + 18.5;
+  metodoPagoLines.forEach((l: string, idx: number) => {
+    doc.text(l, 158, mpY);
+    if (idx < metodoPagoLines.length - 1) mpY += 3.5;
+  });
 
-  // Items Table
-  y = 80;
+  // Régimen sin truncar (salto de línea debajo)
+  let regY = y + 24.5;
+  regimenLines.forEach((l: string, idx: number) => {
+    doc.text(l, 158, regY);
+    if (idx < regimenLines.length - 1) regY += 3.5;
+  });
+
+  // 4. Items Table Header (Columnas claramente separadas para evitar colisión de texto)
+  y = y + padronBoxHeight + 5;
   doc.setFillColor(15, 23, 42);
-  doc.rect(12, y, 186, 8, "F");
+  doc.rect(12, y, 186, 7.5, "F");
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
   doc.setTextColor(255, 255, 255);
-  doc.text("CANT.", 16, y + 5.2);
-  doc.text("UNIDAD", 30, y + 5.2);
-  doc.text("DESCRIPCION DEL SERVICIO EDUCATIVO / LIQUIDACION DOCENTE", 48, y + 5.2);
-  doc.text("AFECTACION", 142, y + 5.2);
-  doc.text("V. UNIT", 168, y + 5.2, { align: "right" });
-  doc.text("IMPORTE", 195, y + 5.2, { align: "right" });
+  doc.text("CANT.", 14, y + 5);
+  doc.text("UNIDAD", 26, y + 5);
+  doc.text("DESCRIPCION DEL SERVICIO EDUCATIVO / LIQUIDACION DOCENTE", 42, y + 5);
+  doc.text("AFECTACION", 122, y + 5);
+  doc.text("V. UNIT", 168, y + 5, { align: "right" });
+  doc.text("IMPORTE", 195, y + 5, { align: "right" });
 
-  y += 8;
+  // 5. Items Table Row (Cálculo dinámico de alto con saltos de línea debajo para todo lo largo)
+  y += 7.5;
   const cant = det.clasesDictadas || 1;
   const vUnit = det.tarifaPorClase || factura.monto;
   const afectacionLabel =
@@ -1507,86 +1574,137 @@ export function generateSunatElectronicPdf(
       ? "4TA CAT RHE"
       : "EXONERADO";
 
-  doc.setDrawColor(226, 232, 240);
-  doc.rect(12, y, 186, 18, "S");
-
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
-  doc.setTextColor(15, 23, 42);
-  doc.text(String(cant), 18, y + 6);
-  doc.setFont("helvetica", "normal");
-  doc.text("ZZ (SRV)", 30, y + 6);
-  doc.setFont("helvetica", "bold");
-  doc.text(cleanText(factura.concepto).substring(0, 52), 48, y + 6);
-
+  const conceptoLines = doc.splitTextToSize(cleanText(factura.concepto || "Servicio Educativo"), 76);
+  
+  let cursosLines: string[] = [];
   if (det.cursosVinculados && det.cursosVinculados.length > 0) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Cursos / Detalle: ${cleanText(det.cursosVinculados.join(", ")).substring(0, 65)}`, 48, y + 12);
+    cursosLines = doc.splitTextToSize(`Cursos / Detalle: ${cleanText(det.cursosVinculados.join(", "))}`, 76);
   }
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.5);
-  doc.setTextColor(51, 65, 85);
-  doc.text(afectacionLabel, 142, y + 6);
-  doc.text(`S/. ${Number(vUnit).toFixed(2)}`, 168, y + 6, { align: "right" });
-  doc.text(`S/. ${Number(factura.monto).toFixed(2)}`, 195, y + 6, { align: "right" });
+  const rowLinesCount = conceptoLines.length + cursosLines.length;
+  const rowHeight = Math.max(16, 6 + (conceptoLines.length * 4) + (cursosLines.length * 3.6));
 
-  y += 22;
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(12, y, 186, rowHeight, "S");
 
-  // Amount in Words Bar
-  const letras = cleanText(det.montoEnLetras || numeroALetrasSoles(factura.monto));
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(12, y, 186, 8, 1.5, 1.5, "FD");
+  // Cantidad y Unidad
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
   doc.setTextColor(15, 23, 42);
-  doc.text(letras, 16, y + 5.3);
+  doc.text(String(cant), 16, y + 6);
+  doc.setFont("helvetica", "normal");
+  doc.text("ZZ (SRV)", 26, y + 6);
 
-  y += 12;
+  // Concepto multilínea (salto de línea debajo sin cortar nombres largos)
+  let textDescY = y + 6;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  conceptoLines.forEach((l: string) => {
+    doc.text(l, 42, textDescY);
+    textDescY += 4;
+  });
 
-  // Bottom Split: Left QR + Hash + SUNAT Legend | Right Tax Totals Box
+  if (cursosLines.length > 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(15, 23, 42);
+    cursosLines.forEach((l: string) => {
+      doc.text(l, 42, textDescY);
+      textDescY += 3.6;
+    });
+  }
+
+  // Afectación, Valor Unitario e Importe (Ubicaciones separadas para cero solapamiento)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(afectacionLabel, 122, y + 6);
+  doc.text(`S/. ${Number(vUnit).toFixed(2)}`, 168, y + 6, { align: "right" });
+  doc.text(`S/. ${Number(factura.monto).toFixed(2)}`, 195, y + 6, { align: "right" });
+
+  y += rowHeight + 4;
+
+  // 6. Amount in Words Bar (con salto de línea si el monto en letras es muy largo)
+  const letras = cleanText(det.montoEnLetras || numeroALetrasSoles(factura.monto));
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  const letrasLines = doc.splitTextToSize(letras, 180);
+  const barHeight = Math.max(8, 3.5 + (letrasLines.length * 3.8));
+
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(12, y, 186, barHeight, 1.5, 1.5, "FD");
+  doc.setTextColor(15, 23, 42);
+
+  let letY = y + 5;
+  letrasLines.forEach((l: string) => {
+    doc.text(l, 16, letY);
+    letY += 3.8;
+  });
+
+  y += barHeight + 4;
+
+  // 7. Bottom Split: Left QR + Hash + SUNAT Legends | Right Tax Totals Box
   const qrStr =
     det.qrCadena ||
     `${rucEmisor}|03|${serieCorrelativo}|0.00|${factura.monto.toFixed(2)}|${fechaStr}|1|${docNum}|${det.hashCpe || "xK9pL2mQ="}|`;
-  drawSunatQrMatrix(doc, qrStr, 14, y + 2, 32);
+  drawSunatQrMatrix(doc, qrStr, 14, y + 1, 30);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
   doc.setTextColor(15, 23, 42);
-  doc.text("RESUMEN HASH CPE (FIRMA DIGITAL UBL 2.1):", 50, y + 6);
+  doc.text("RESUMEN HASH CPE (FIRMA DIGITAL UBL 2.1):", 47, y + 5);
+
   doc.setFont("courier", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(30, 58, 138);
-  doc.text(det.hashCpe || "xK9pL2mQ8vR4tW7yZ1nB5cV8mN3q=", 50, y + 11);
+  doc.text(det.hashCpe || "xK9pL2mQ8vR4tW7yZ1nB5cV8mN3q=", 47, y + 10);
 
+  // Leyendas SUNAT (con splitTextToSize de 80mm para no chocar nunca con la caja de totales a la derecha)
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
-  doc.setTextColor(71, 85, 105);
-  doc.text("Representacion impresa del Comprobante de Pago Electronico.", 50, y + 17);
-  doc.text(
-    esSandbox
-      ? "Generado en el Entorno de Pruebas / Homologacion de SUNAT (RUC 20000000001)."
-      : "Comprobante de Control Interno Institucional - Exonerado de IGV (Art. 2 Ley IGV).",
-    50,
-    y + 21.5
-  );
-  doc.text(`Estado SUNAT: ${cleanText(det.estadoSunat || "ACEPTADO")} | Codigo CDR: 0`, 50, y + 26);
+  doc.setTextColor(15, 23, 42);
 
-  // Totals Box on the Right
+  const legend1 = doc.splitTextToSize("Representacion impresa del Comprobante de Pago Electronico.", 80);
+  let legY = y + 15.5;
+  legend1.forEach((l: string) => {
+    doc.text(l, 47, legY);
+    legY += 3.5;
+  });
+
+  const legend2Str = esSandbox
+    ? "Generado en el Entorno de Pruebas / Homologacion de SUNAT (RUC 20000000001)."
+    : "Comprobante de Control Interno Institucional - Exonerado de IGV (Art. 2 Ley IGV).";
+  const legend2 = doc.splitTextToSize(legend2Str, 80);
+  legend2.forEach((l: string) => {
+    doc.text(l, 47, legY);
+    legY += 3.5;
+  });
+
+  const legend3Str = `Estado SUNAT: ${cleanText(det.estadoSunat || "ACEPTADO")} | Codigo CDR: 0`;
+  const legend3 = doc.splitTextToSize(legend3Str, 80);
+  legend3.forEach((l: string) => {
+    doc.text(l, 47, legY);
+    legY += 3.5;
+  });
+
+  // Totals Box on the Right (x = 132 a 198)
   const opGravada = Number(det.opGravada || 0);
   const opExonerada = Number(det.opExonerada ?? (det.afectacionIgv === "gravado" ? 0 : factura.monto));
   const igvMonto = Number(det.igvMonto || 0);
   const retencion = Number(det.retencionRentaMonto || 0);
 
   doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(132, y, 66, 34, 2, 2, "S");
+  doc.roundedRect(132, y, 66, 35, 2, 2, "S");
 
-  doc.setFont("helvetica", "normal");
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
-  doc.setTextColor(71, 85, 105);
+  doc.setTextColor(15, 23, 42);
   doc.text("Op. Gravada:", 136, y + 6.5);
   doc.text("Op. Exonerada:", 136, y + 12.5);
   doc.text("I.G.V. (18%):", 136, y + 18.5);
@@ -1600,11 +1718,11 @@ export function generateSunatElectronicPdf(
   doc.text(`S/. ${retencion.toFixed(2)}`, 194, y + 24.5, { align: "right" });
 
   doc.setFillColor(15, 23, 42);
-  doc.rect(132, y + 26.5, 66, 7.5, "F");
+  doc.rect(132, y + 27, 66, 8, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(8.5);
-  doc.text("IMPORTE TOTAL:", 136, y + 31.5);
-  doc.text(`S/. ${Number(factura.monto).toFixed(2)}`, 194, y + 31.5, { align: "right" });
+  doc.text("IMPORTE TOTAL:", 136, y + 32.2);
+  doc.text(`S/. ${Number(factura.monto).toFixed(2)}`, 194, y + 32.2, { align: "right" });
 
   if (shouldDownload) {
     doc.save(`${serieCorrelativo}_${rucEmisor}.pdf`);

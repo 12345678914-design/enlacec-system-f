@@ -535,8 +535,8 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
           
           {/* Courses Schedule */}
           <div className="bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm lg:col-span-1 space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-450 flex items-center gap-2">
-              <CalendarClock className="w-4 h-4 text-gray-450" />
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+              <CalendarClock className="w-4 h-4 text-indigo-500" />
               Tus Clases Activas
             </h3>
             
@@ -564,7 +564,7 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
 
           {/* Institutional News (NOTICIAS - REQUISITO EXPLICITO) */}
           <div className="bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm lg:col-span-2 space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-450">Últimas Noticias Institucionales</h3>
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">Últimas Noticias Institucionales</h3>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {news.map(item => (
@@ -658,7 +658,7 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
         {/* Existing logs list */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm overflow-hidden">
           <div className="p-5 border-b border-gray-100 dark:border-zinc-850">
-            <h3 className="text-xs font-bold text-gray-450 uppercase tracking-widest">Historial de Clases Registradas</h3>
+            <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-widest">Historial de Clases Registradas</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
@@ -962,8 +962,8 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm interactive-hover-lift">
-            <h4 className="text-xs uppercase font-bold text-gray-450 tracking-wide">Tu Sueldo Mensual Establecido</h4>
-            <h2 className={`text-3xl font-extrabold mt-1 tracking-tight ${cl.primaryText}`}>
+            <h4 className="text-xs uppercase font-black text-slate-900 dark:text-white tracking-wide">Tu Sueldo Mensual Establecido</h4>
+            <h2 className="text-3xl font-black mt-1 tracking-tight text-black dark:text-white">
               S/. {matchedDocente?.salary.toLocaleString('es-ES') || '1.800'}
             </h2>
             <p className="text-[10px] text-gray-400 mt-2 font-medium">Asignado por Dirección directiva</p>
@@ -992,8 +992,8 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
           </div>
 
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm interactive-hover-lift">
-            <h4 className="text-xs uppercase font-bold text-gray-450 tracking-wide">Total Recibido Año</h4>
-            <h2 className="text-2xl font-bold mt-1 text-gray-800 dark:text-zinc-200">
+            <h4 className="text-xs uppercase font-black text-slate-900 dark:text-white tracking-wide">Total Recibido Año</h4>
+            <h2 className="text-2xl font-black mt-1 text-black dark:text-white">
               S/. {(paysReceived.reduce((acc, curr) => acc + curr.amount, 0)).toLocaleString('es-ES')}
             </h2>
             <span className="text-[10px] text-gray-400 mt-2 block font-medium">Basado en comprobantes contables</span>
@@ -1021,7 +1021,7 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
         {/* Specific payroll history logs */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm overflow-hidden">
           <div className="p-5 border-b border-gray-100 dark:border-zinc-850 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <h3 className="text-xs font-bold text-gray-450 uppercase tracking-widest">Historial Comprobantes Depositos</h3>
+            <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-widest">Historial Comprobantes Depositos</h3>
             <div className="flex items-center gap-2">
               <button
                 id="btn-docente-export-csv"
@@ -1137,7 +1137,7 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
             </span>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-none">Archivero Escolar</h3>
+                <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-widest leading-none">Archivero Escolar</h3>
                 <span className="text-[9px] font-extrabold text-blue-600 dark:text-blue-400 bg-blue-100/50 dark:bg-blue-955/30 px-1.5 py-0.5 rounded-md border border-blue-200/30">SOLO LECTURA</span>
               </div>
               <div className="flex items-center gap-2 mt-2 text-sm font-bold text-gray-800 dark:text-zinc-200">
@@ -2171,7 +2171,7 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
               value={docenteFacSearch}
               onChange={(e) => setDocenteFacSearch(e.target.value)}
               placeholder="Buscar por serie (E001), curso o fecha..."
-              className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-xl text-xs text-gray-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-xl text-xs text-black dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
 

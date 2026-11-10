@@ -1248,8 +1248,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               <GraduationCap className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-gray-400">Total Estudiantes</p>
-              <h3 className="text-2xl font-bold text-gray-800 dark:text-white mt-0.5">{totalEstudios}</h3>
+              <p className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Total Estudiantes</p>
+              <h3 className="text-2xl font-black text-black dark:text-white mt-0.5">{totalEstudios}</h3>
               <p className="text-[10px] text-emerald-500 font-semibold flex items-center mt-0.5">
                 <TrendingUp className="w-3 h-3 mr-0.5" /> +2 nuevos este mes
               </p>
@@ -1261,8 +1261,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-gray-400">Planta Docente</p>
-              <h3 className="text-2xl font-bold text-gray-800 dark:text-white mt-0.5">{totalProfes}</h3>
+              <p className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Planta Docente</p>
+              <h3 className="text-2xl font-black text-black dark:text-white mt-0.5">{totalProfes}</h3>
               <p className="text-[10px] text-gray-500 font-semibold flex items-center mt-0.5">
                 100% Calificados
               </p>
@@ -1274,8 +1274,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               <DollarSign className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-gray-400">Balance Escolar</p>
-              <h3 className="text-2xl font-bold text-gray-800 dark:text-white mt-0.5">
+              <p className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Balance Escolar</p>
+              <h3 className="text-2xl font-black text-black dark:text-white mt-0.5">
                 S/. {balance.toLocaleString('es-ES')}
               </h3>
               <p className="text-[10px] text-emerald-500 font-semibold flex items-center mt-0.5">
@@ -2601,7 +2601,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                 {/* Tab content swapping */}
                 {studentModalTab === 'notas' && (
                   <div className="mt-5 space-y-4 animate-in fade-in duration-200">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-gray-450">Boletín Oficial de Notas</h4>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">Boletín Oficial de Notas</h4>
 
                     {/* Real-time Grades list from Supabase 'notas' table */}
                     {(() => {
@@ -5655,7 +5655,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               <Folder className="w-5 h-5 fill-yellow-250/20" />
             </span>
             <div>
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-none">Navegador Unificado de Recursos</h3>
+              <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-widest leading-none">Navegador Unificado de Recursos</h3>
               <div className="flex items-center gap-2 mt-2 text-sm font-bold text-gray-800 dark:text-zinc-200">
                 <button type="button" onClick={handleGoBack} className="hover:underline text-gray-500 dark:text-zinc-400 transition-colors">
                   Raíz Drive
@@ -6446,7 +6446,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
         {/* Transactions log sheet */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm overflow-hidden">
           <div className="p-5 border-b border-gray-100 dark:border-zinc-850 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <h3 className="text-xs font-bold text-gray-450 uppercase tracking-widest">Historial de Transacciones Coherentes</h3>
+            <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-widest">Historial de Transacciones Coherentes</h3>
             <div className="flex items-center gap-2">
               <button
                 id="btn-export-transactions-csv"

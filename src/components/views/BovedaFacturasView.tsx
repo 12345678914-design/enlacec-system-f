@@ -1369,7 +1369,7 @@ export const BovedaFacturasView: React.FC = () => {
               value={passcodeAttempt}
               onChange={(e) => setPasscodeAttempt(e.target.value)}
               placeholder="Ingresa la clave..."
-              className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-gray-200 dark:border-zinc-800 rounded-xl text-center font-mono font-bold tracking-widest text-slate-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+              className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-gray-200 dark:border-zinc-800 rounded-xl text-center font-mono font-bold tracking-widest text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
               autoFocus
             />
           </div>
@@ -1631,13 +1631,13 @@ export const BovedaFacturasView: React.FC = () => {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Total Facturado</span>
+            <span className="text-[11px] font-black text-slate-900 dark:text-white uppercase tracking-wider">Total Facturado</span>
             <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/20 text-indigo-500">
               <Receipt className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-2">
-            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-slate-800 dark:text-slate-150 tracking-tight">
+            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-black dark:text-white tracking-tight">
               S/. {stats.totalEmitido.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
             </span>
           </div>
@@ -1645,7 +1645,7 @@ export const BovedaFacturasView: React.FC = () => {
 
         <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Total Cobrado</span>
+            <span className="text-[11px] font-black text-slate-900 dark:text-white uppercase tracking-wider">Total Cobrado</span>
             <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500">
               <CheckCircle className="w-4 h-4" />
             </div>
@@ -1659,13 +1659,13 @@ export const BovedaFacturasView: React.FC = () => {
 
         <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Por Cobrar</span>
+            <span className="text-[11px] font-black text-slate-900 dark:text-white uppercase tracking-wider">Por Cobrar</span>
             <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 text-amber-500">
               <Clock className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-2">
-            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-amber-600 dark:text-amber-450 tracking-tight">
+            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-amber-600 dark:text-amber-400 tracking-tight">
               S/. {stats.totalPendiente.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
             </span>
           </div>
@@ -1673,13 +1673,13 @@ export const BovedaFacturasView: React.FC = () => {
 
         <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Comprobantes</span>
+            <span className="text-[11px] font-black text-slate-900 dark:text-white uppercase tracking-wider">Comprobantes</span>
             <div className="p-2 rounded-lg bg-sky-50 dark:bg-sky-950/20 text-sky-500">
               <FileText className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-2">
-            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-slate-800 dark:text-slate-150 tracking-tight">
+            <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-black dark:text-white tracking-tight">
               {stats.count} registros
             </span>
           </div>
@@ -1943,7 +1943,7 @@ export const BovedaFacturasView: React.FC = () => {
               placeholder="Buscar por Serie (B001, F001), DNI/RUC o nombre..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-150 placeholder:text-gray-400"
+              className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-black dark:text-white placeholder:text-gray-400"
             />
           </div>
 
@@ -2052,7 +2052,7 @@ export const BovedaFacturasView: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/50 dark:bg-slate-950/20 border-b border-gray-150 dark:border-white/10 text-[10px] font-black text-gray-400 dark:text-zinc-500 uppercase tracking-widest">
+              <tr className="bg-slate-50/50 dark:bg-slate-950/20 border-b border-gray-150 dark:border-white/10 text-[10px] font-black text-slate-850 dark:text-slate-100 uppercase tracking-widest">
                 <th className="py-3 px-4">Serie / Correlativo</th>
                 <th className="py-3 px-4">Concepto & Afectación</th>
                 <th className="py-3 px-4">Receptor (DNI / RUC)</th>
@@ -2095,7 +2095,7 @@ export const BovedaFacturasView: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4 max-w-xs">
-                        <div className="font-bold text-slate-800 dark:text-slate-100 truncate" title={factura.concepto}>
+                        <div className="font-bold text-black dark:text-white truncate" title={factura.concepto}>
                           {factura.concepto}
                         </div>
                         <div className="text-[10px] text-gray-500 dark:text-zinc-400 mt-0.5">
@@ -2112,7 +2112,7 @@ export const BovedaFacturasView: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-800 dark:text-slate-200">
+                        <div className="font-bold text-black dark:text-white">
                           {factura.detalles?.nombrePersona || 'Receptor General'}
                         </div>
                         <div className="text-[10px] font-mono text-gray-500 dark:text-zinc-400">
@@ -2121,19 +2121,19 @@ export const BovedaFacturasView: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="text-gray-600 dark:text-zinc-300 font-mono text-[11px]">
+                        <div className="text-black dark:text-white font-mono text-[11px] font-bold">
                           {new Date(factura.created_at).toLocaleDateString('es-PE', {
                             day: '2-digit',
                             month: '2-digit',
                             year: 'numeric'
                           })}
                         </div>
-                        <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400" title={factura.detalles?.hashCpe}>
+                        <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-bold" title={factura.detalles?.hashCpe}>
                           Hash: {hashShort}
                         </div>
                       </td>
 
-                      <td className="py-3.5 px-4 text-right font-mono tabular-nums font-black text-slate-800 dark:text-slate-100 text-sm">
+                      <td className="py-3.5 px-4 text-right font-mono tabular-nums font-black text-black dark:text-white text-sm">
                         S/. {factura.monto.toFixed(2)}
                       </td>
 
@@ -2988,7 +2988,7 @@ export const BovedaFacturasView: React.FC = () => {
                         value={consultaValidadasBusqueda}
                         onChange={(e) => setConsultaValidadasBusqueda(e.target.value)}
                         placeholder="Buscar por RUC, Serie (F001/B001), Razón Social o Ticket..."
-                        className="w-full pl-8 pr-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs"
+                        className="w-full pl-8 pr-3 py-2 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl text-xs text-black dark:text-white placeholder:text-gray-400"
                       />
                     </div>
                     <select
@@ -3397,7 +3397,7 @@ export const BovedaFacturasView: React.FC = () => {
                       value={greSearchQuery}
                       onChange={(e) => setGreSearchQuery(e.target.value)}
                       placeholder="Filtrar T001-..."
-                      className="px-2.5 py-1 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-lg font-mono text-[11px]"
+                      className="px-2.5 py-1 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-lg font-mono text-[11px] text-black dark:text-white placeholder:text-gray-400"
                     />
                   </div>
 
