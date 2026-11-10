@@ -386,19 +386,12 @@ export const TeslaAIChatView: React.FC = () => {
 
       switch (type) {
         case "ADD_STUDENT":
-          addStudent({
-            nombre: p.nombre,
-            grado: p.grado,
-            seccion: p.seccion || "A",
-            promedio: Number(p.promedio) || 10,
-            asistencia: Number(p.asistencia) || 100,
-            estadoPago: p.estadoPago || "Al Día"
-          });
+          addStudent(p as any);
           success = true;
           break;
         case "UPDATE_STUDENT":
           if (p.id) {
-            updateStudent(p.id, p);
+            updateStudent(p as any);
             success = true;
           }
           break;
@@ -409,17 +402,12 @@ export const TeslaAIChatView: React.FC = () => {
           }
           break;
         case "ADD_TEACHER":
-          addTeacher({
-            nombre: p.nombre,
-            materia: p.materia,
-            grado: p.grado || "1° Primaria",
-            estado: p.estado || "Activo"
-          });
+          addTeacher(p as any);
           success = true;
           break;
         case "UPDATE_TEACHER":
           if (p.id) {
-            updateTeacher(p.id, p);
+            updateTeacher(p as any);
             success = true;
           }
           break;
@@ -430,22 +418,11 @@ export const TeslaAIChatView: React.FC = () => {
           }
           break;
         case "ADD_TRANSACTION":
-          addTransaction({
-            descripcion: p.descripcion,
-            monto: Number(p.monto) || 0,
-            tipo: p.tipo === "ingreso" ? "ingreso" : "egreso",
-            categoria: p.categoria || "Otros"
-          });
+          addTransaction(p as any);
           success = true;
           break;
         case "ADD_NEWS":
-          addNews({
-            titulo: p.titulo,
-            contenido: p.contenido,
-            categoria: p.categoria || "Aviso",
-            prioridad: p.prioridad || "Media",
-            fecha: new Date().toLocaleDateString("es-ES")
-          });
+          addNews(p as any);
           success = true;
           break;
         case "UPDATE_THEME":

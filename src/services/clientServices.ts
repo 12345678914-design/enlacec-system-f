@@ -79,10 +79,12 @@ async function callGroqApiWithRetry(
   if (!cleanKey) return null;
 
   const attempts: { model: string; jsonMode: boolean }[] = [
+    { model: 'openai/gpt-oss-120b', jsonMode: preferJsonMode },
+    ...(preferJsonMode ? [{ model: 'openai/gpt-oss-120b', jsonMode: false }] : []),
+    { model: 'qwen/qwen3.8-27b', jsonMode: preferJsonMode },
+    { model: 'openai/gpt-oss-20b', jsonMode: preferJsonMode },
     { model: 'llama-3.3-70b-versatile', jsonMode: preferJsonMode },
-    ...(preferJsonMode ? [{ model: 'llama-3.3-70b-versatile', jsonMode: false }] : []),
-    { model: 'llama-3.1-8b-instant', jsonMode: false },
-    { model: 'llama3-70b-8192', jsonMode: false }
+    { model: 'llama-3.1-8b-instant', jsonMode: false }
   ];
 
   for (const attempt of attempts) {

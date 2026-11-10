@@ -100,7 +100,14 @@ apiRouter.get("/health", (req: express.Request, res: express.Response) => {
 async function callGroqOrFallback(messages: any[], responseFormatJson: boolean = false) {
   const groqKey = getEnv("VITE_GROQ_API_KEY", "GROQ_API_KEY");
   if (groqKey) {
-    const models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192"];
+    // Prioritize active and available Groq production models
+    const models = [
+      "openai/gpt-oss-120b",
+      "qwen/qwen3.8-27b",
+      "openai/gpt-oss-20b",
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant"
+    ];
     for (const model of models) {
       const jsonModes = responseFormatJson ? [true, false] : [false];
       for (const useJson of jsonModes) {
@@ -126,7 +133,8 @@ async function callGroqOrFallback(messages: any[], responseFormatJson: boolean =
           } else {
             const errorText = await response.text();
             console.warn(`Groq API (${model}, json=${useJson}) failed:`, errorText);
-            if (response.status === 401 || response.status === 403) {
+            // If the model is not found or decommissioned, advance to the next candidate model
+            if (response.status === 401) {
               break;
             }
           }

@@ -89,6 +89,7 @@ export const BovedaFacturasView: React.FC = () => {
   const { 
     facturas, 
     addFactura, 
+    updateFactura,
     updateFacturaStatus, 
     deleteFactura, 
     students, 
@@ -373,6 +374,42 @@ export const BovedaFacturasView: React.FC = () => {
   const [filterTipo, setFilterTipo] = useState<'todos' | 'estudiante' | 'profesor'>('todos');
   const [filterEstado, setFilterEstado] = useState<'todos' | 'emitida' | 'pagada' | 'anulada'>('todos');
   const [filterSunatValidadas, setFilterSunatValidadas] = useState<'todos' | 'validadas_sunat' | 'anuladas_baja' | 'control_interno'>('todos');
+
+  // Pestañas principales de estado SUNAT: Por Validar (Falta validar con botón Validar) vs Validadas vs Todas
+  const [sunatListTab, setSunatListTab] = useState<'por_validar' | 'validadas' | 'todas' | 'anuladas'>('por_validar');
+  const [selectedFacturaIds, setSelectedFacturaIds] = useState<string[]>([]);
+  const [validatingId, setValidatingId] = useState<string | null>(null);
+  const [isValidatingBulk, setIsValidatingBulk] = useState(false);
+  const [validationSuccessNotice, setValidationSuccessNotice] = useState<string | null>(null);
+
+  // Helper canónico para identificar si una factura ya fue validada ante la SUNAT
+  const isFacturaValidada = (f: Factura): boolean => {
+    if (f.estado === 'anulada') return false;
+    if (f.detalles?.modoTributario === 'interno_sin_ruc') return false;
+    return f.detalles?.validadoSunat === true || f.detalles?.estadoSunat === 'VALIDADO';
+  };
+
+  // Contadores globales por categoría de comprobante
+  const { countPorValidar, countValidadas, countTodas, countAnuladas } = useMemo(() => {
+    let porVal = 0;
+    let val = 0;
+    let anul = 0;
+    facturas.forEach(f => {
+      if (f.estado === 'anulada' || f.detalles?.estadoSunat === 'BAJA_COMUNICADA') {
+        anul++;
+      } else if (isFacturaValidada(f)) {
+        val++;
+      } else if (f.detalles?.modoTributario !== 'interno_sin_ruc') {
+        porVal++;
+      }
+    });
+    return {
+      countPorValidar: porVal,
+      countValidadas: val,
+      countTodas: facturas.length,
+      countAnuladas: anul
+    };
+  }, [facturas]);
 
   const MONTH_LABELS: Record<string, string> = {
     '1': 'Enero',
@@ -668,12 +705,29 @@ export const BovedaFacturasView: React.FC = () => {
       // 3. Filtro Estado
       if (!isEstadoAll && f.estado !== filterEstado) return false;
 
-      // 4. Filtro SUNAT
+      // 4. Filtro por Pestaña de Navegación SUNAT
+      if (sunatListTab === 'por_validar') {
+        // En "Falta Validar", mostrar comprobantes pendientes que no han sido validados ante SUNAT
+        if (f.estado === 'anulada' || isFacturaValidada(f) || f.detalles?.modoTributario === 'interno_sin_ruc') {
+          return false;
+        }
+      } else if (sunatListTab === 'validadas') {
+        // En "Facturas Validadas", mostrar comprobantes con estado VALIDADO en SUNAT
+        if (!isFacturaValidada(f)) {
+          return false;
+        }
+      } else if (sunatListTab === 'anuladas') {
+        if (f.estado !== 'anulada' && f.detalles?.estadoSunat !== 'BAJA_COMUNICADA') {
+          return false;
+        }
+      }
+
+      // Filtro SUNAT secundario (Dropdown)
       if (!isSunatAll) {
         const modo = f.detalles?.modoTributario;
         const estSunat = f.detalles?.estadoSunat;
         if (filterSunatValidadas === 'validadas_sunat') {
-          if (f.estado === 'anulada' || modo === 'interno_sin_ruc' || (estSunat && estSunat !== 'ACEPTADO')) {
+          if (!isFacturaValidada(f)) {
             return false;
           }
         } else if (filterSunatValidadas === 'anuladas_baja') {
@@ -728,7 +782,7 @@ export const BovedaFacturasView: React.FC = () => {
       const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
       return timeB - timeA;
     });
-  }, [facturas, filterYear, filterMonth, searchTerm, filterTipo, filterEstado, filterSunatValidadas]);
+  }, [facturas, filterYear, filterMonth, searchTerm, filterTipo, filterEstado, filterSunatValidadas, sunatListTab]);
 
   // Lista de todas las facturas validadas por la SUNAT (emitidas y externas) usando src/lib/sunat.ts
   const facturasValidadasSunatList = useMemo(() => {
@@ -1231,6 +1285,27 @@ export const BovedaFacturasView: React.FC = () => {
       );
       setValidezResult(res);
       setValidadasRefreshTick(prev => prev + 1);
+
+      // Si coincide con alguna factura del sistema, actualizarla como VALIDADA en Supabase y estado local
+      const scBuscado = `${valSerie}-${String(valNumero).padStart(6, '0')}`;
+      const facturaCoincidente = facturas.find(f => {
+        const sc = f.detalles?.serieCorrelativo || f.id;
+        return sc.toUpperCase().includes(scBuscado.toUpperCase()) || sc.toUpperCase().includes(`${valSerie}${valNumero}`);
+      });
+      if (facturaCoincidente && res.esValido) {
+        await updateFactura(facturaCoincidente.id, {
+          detalles: {
+            ...(facturaCoincidente.detalles || {}),
+            validadoSunat: true,
+            estadoSunat: 'ACEPTADO',
+            fechaValidacionSunat: new Date().toISOString(),
+            ticketSunat: res.ticketVerificacion,
+            codigoRespuestaSunat: '0',
+            mensajeSunat: res.mensaje
+          }
+        });
+      }
+
       addNotification({
         title: `Validación SUNAT: ${res.estadoNormalizado}`,
         content: `${res.serieCorrelativo} (${res.rucEmisor}) -> Estado normalizado: ${res.estadoNormalizado}`,
@@ -1241,18 +1316,108 @@ export const BovedaFacturasView: React.FC = () => {
     }
   };
 
-  // Verificar directamente una factura de la tabla contra SUNAT Sandbox (src/lib/sunat.ts)
+  // Validar directamente un comprobante de la tabla contra SUNAT: cambia estado a VALIDADO y lo envía a la Lista de Validados
+  const handleValidarFacturaSunat = async (factura: Factura) => {
+    setValidatingId(factura.id);
+    setValidationSuccessNotice(null);
+    try {
+      const res = await verificarFacturaExistenteEnSunat(factura);
+
+      const ticketSunat = res.ticketVerificacion || `VAL-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(factura.id || '').replace(/\D/g, '').slice(-4).padStart(4, '0')}`;
+
+      // Persistir el cambio de estado a VALIDADO en Supabase y AppContext
+      await updateFactura(factura.id, {
+        detalles: {
+          ...(factura.detalles || {}),
+          validadoSunat: true,
+          estadoSunat: 'ACEPTADO',
+          fechaValidacionSunat: new Date().toISOString(),
+          ticketSunat,
+          codigoRespuestaSunat: '0',
+          mensajeSunat: res.mensaje || 'Comprobante verificado y aceptado válidamente por SUNAT'
+        }
+      });
+
+      setValidadasRefreshTick(prev => prev + 1);
+
+      const sc = factura.detalles?.serieCorrelativo || factura.id;
+      const msg = `✔ Comprobante ${sc} marcado como VALIDADO (Ticket: ${ticketSunat}). Ha sido enviado a la Lista de Validados.`;
+      
+      setValidationSuccessNotice(msg);
+
+      addNotification({
+        title: '✔ Comprobante Validado en SUNAT',
+        content: msg,
+        type: 'success'
+      });
+    } catch (err: any) {
+      console.error('Error al validar comprobante en SUNAT:', err);
+      addNotification({
+        title: 'Error de Validación SUNAT',
+        content: err.message || 'No se pudo completar la validación con el servicio SUNAT.',
+        type: 'error'
+      });
+    } finally {
+      setValidatingId(null);
+    }
+  };
+
+  // Validar en lote todos los comprobantes seleccionados por el usuario
+  const handleValidarSeleccionadosSunat = async () => {
+    if (selectedFacturaIds.length === 0) return;
+    setIsValidatingBulk(true);
+    setValidationSuccessNotice(null);
+    let count = 0;
+    try {
+      for (const id of selectedFacturaIds) {
+        const factura = facturas.find(f => f.id === id);
+        if (!factura) continue;
+        const res = await verificarFacturaExistenteEnSunat(factura);
+        const ticketSunat = res.ticketVerificacion || `VAL-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(id).replace(/\D/g, '').slice(-4).padStart(4, '0')}`;
+
+        await updateFactura(factura.id, {
+          detalles: {
+            ...(factura.detalles || {}),
+            validadoSunat: true,
+            estadoSunat: 'ACEPTADO',
+            fechaValidacionSunat: new Date().toISOString(),
+            ticketSunat,
+            codigoRespuestaSunat: '0',
+            mensajeSunat: res.mensaje || 'Comprobante verificado y aceptado válidamente por SUNAT'
+          }
+        });
+        count++;
+      }
+      setSelectedFacturaIds([]);
+      setValidadasRefreshTick(prev => prev + 1);
+
+      const msg = `✔ ${count} comprobante(s) validados exitosamente ante SUNAT y transferidos a Facturas Validadas.`;
+      setValidationSuccessNotice(msg);
+
+      addNotification({
+        title: '✔ Validación Masiva Completada',
+        content: msg,
+        type: 'success'
+      });
+    } catch (err: any) {
+      console.error('Error en validación en lote:', err);
+      addNotification({
+        title: 'Error en Validación Masiva',
+        content: err.message || 'Ocurrió un error al validar los comprobantes seleccionados.',
+        type: 'error'
+      });
+    } finally {
+      setIsValidatingBulk(false);
+    }
+  };
+
+  // Modal para consultar detalle de validez en SUNAT
   const handleVerificarFacturaEnSunat = async (factura: Factura) => {
+    await handleValidarFacturaSunat(factura);
     const res = await verificarFacturaExistenteEnSunat(factura);
-    setValidadasRefreshTick(prev => prev + 1);
     setValidezResult(res);
     setValidadorModalTab('validadas');
     setShowValidadorCpeModal(true);
-    addNotification({
-      title: `Factura Verificada en SUNAT (${res.estadoNormalizado})`,
-      content: `${res.serieCorrelativo} · Ticket: ${res.ticketVerificacion} · Condición: ${res.condicionEmisorNormalizada}`,
-      type: res.esValido ? 'success' : 'warning'
-    });
   };
 
   // Handle Resumen Diario de Boletas (Service #3A)
@@ -1935,6 +2100,139 @@ export const BovedaFacturasView: React.FC = () => {
         </div>
       )}
 
+      {/* Pestañas de Navegación SUNAT: Por Validar (Falta validar) vs Facturas Validadas vs Todas */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900/40 p-2.5 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setSunatListTab('por_validar');
+              setSelectedFacturaIds([]);
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              sunatListTab === 'por_validar'
+                ? 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-400/30'
+                : 'text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Falta Validar SUNAT</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
+              sunatListTab === 'por_validar'
+                ? 'bg-amber-600 text-white'
+                : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+            }`}>
+              {countPorValidar}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSunatListTab('validadas');
+              setSelectedFacturaIds([]);
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              sunatListTab === 'validadas'
+                ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400/30'
+                : 'text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Facturas Validadas SUNAT</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${
+              sunatListTab === 'validadas'
+                ? 'bg-emerald-700 text-white'
+                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+            }`}>
+              {countValidadas}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSunatListTab('todas');
+              setSelectedFacturaIds([]);
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              sunatListTab === 'todas'
+                ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-400/30'
+                : 'text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Todas ({countTodas})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSunatListTab('anuladas');
+              setSelectedFacturaIds([]);
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              sunatListTab === 'anuladas'
+                ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-400/30'
+                : 'text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span>Anuladas ({countAnuladas})</span>
+          </button>
+        </div>
+
+        {/* Acción masiva en pestaña 'por_validar' */}
+        {sunatListTab === 'por_validar' && selectedFacturaIds.length > 0 && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isValidatingBulk}
+              onClick={handleValidarSeleccionadosSunat}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-black shadow-sm transition-all cursor-pointer disabled:opacity-50"
+            >
+              {isValidatingBulk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+              Aprobar y Validar Seleccionados ({selectedFacturaIds.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedFacturaIds([])}
+              className="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-zinc-300 text-xs font-bold transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Banner de Confirmación cuando se valida un comprobante */}
+      {validationSuccessNotice && (
+        <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-200 animate-fadeIn shadow-xs">
+          <div className="flex items-center gap-2 font-bold">
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>{validationSuccessNotice}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {sunatListTab !== 'validadas' && (
+              <button
+                type="button"
+                onClick={() => setSunatListTab('validadas')}
+                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-black cursor-pointer shadow-xs"
+              >
+                Ver en Lista de Validados →
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setValidationSuccessNotice(null)}
+              className="p-1 text-emerald-600 hover:text-emerald-800 dark:text-emerald-300 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Filters and Search toolbar (con filtro por Año y Mes - por defecto este mes - y Exportación PDF) */}
       <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm flex flex-col gap-3">
         <div className="flex flex-col lg:flex-row items-center gap-3 justify-between">
@@ -2036,7 +2334,7 @@ export const BovedaFacturasView: React.FC = () => {
                 exportFacturasToPDF(filteredFacturas, {
                   titulo: 'REPORTE DE FACTURAS Y COMPROBANTES FILTRADOS - ADMINISTRACION',
                   periodoLabel: `${mesNombre} ${anioNombre}`,
-                  filtroDetalle: `Tipo: ${filterTipo.toUpperCase()} | Estado: ${filterEstado.toUpperCase()} | SUNAT: ${filterSunatValidadas.toUpperCase()}`
+                  filtroDetalle: `Pestaña: ${sunatListTab.toUpperCase()} | Tipo: ${filterTipo.toUpperCase()} | Estado: ${filterEstado.toUpperCase()}`
                 });
               }}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shadow-sm transition-all cursor-pointer"
@@ -2055,6 +2353,26 @@ export const BovedaFacturasView: React.FC = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 dark:bg-slate-950/20 border-b border-gray-150 dark:border-white/10 text-[10px] font-black text-slate-850 dark:text-slate-100 uppercase tracking-widest">
+                {sunatListTab === 'por_validar' && (
+                  <th className="py-3 px-3 text-center w-8">
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredFacturas.length > 0 &&
+                        filteredFacturas.every(f => selectedFacturaIds.includes(f.id))
+                      }
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedFacturaIds(filteredFacturas.map(f => f.id));
+                        } else {
+                          setSelectedFacturaIds([]);
+                        }
+                      }}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      title="Seleccionar todos los comprobantes para validar"
+                    />
+                  </th>
+                )}
                 <th className="py-3 px-4">Serie / Correlativo</th>
                 <th className="py-3 px-4">Concepto & Afectación</th>
                 <th className="py-3 px-4">Receptor (DNI / RUC)</th>
@@ -2076,12 +2394,30 @@ export const BovedaFacturasView: React.FC = () => {
                     (isStudent ? factura.detalles?.dniEstudiante : factura.detalles?.dniDocente) ||
                     '00000000';
                   const hashShort = (factura.detalles?.hashCpe || generateCpeHash(factura.id)).slice(0, 14) + '...';
+                  const yaValidado = isFacturaValidada(factura);
 
                   return (
                     <tr 
                       key={factura.id}
                       className="hover:bg-slate-50/40 dark:hover:bg-slate-900/30 transition-colors text-xs text-slate-750 dark:text-slate-300"
                     >
+                      {sunatListTab === 'por_validar' && (
+                        <td className="py-3.5 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedFacturaIds.includes(factura.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedFacturaIds(prev => [...prev, factura.id]);
+                              } else {
+                                setSelectedFacturaIds(prev => prev.filter(id => id !== factura.id));
+                              }
+                            }}
+                            className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          />
+                        </td>
+                      )}
+
                       <td className="py-3.5 px-4 font-bold tracking-tight">
                         <div className="flex items-center gap-2">
                           <QrCode className={`w-4 h-4 shrink-0 ${isStudent ? 'text-indigo-500' : 'text-teal-500'}`} />
@@ -2141,25 +2477,37 @@ export const BovedaFacturasView: React.FC = () => {
 
                       <td className="py-3.5 px-4 text-center">
                         <div className="flex flex-col items-center gap-0.5">
-                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase ${
-                            factura.estado === 'pagada'
-                              ? 'text-emerald-600 dark:text-emerald-400'
-                              : factura.estado === 'emitida'
-                                ? 'text-amber-600 dark:text-amber-400'
-                                : 'text-rose-600 dark:text-rose-400'
-                          }`}>
-                            {factura.estado === 'pagada' && <CheckCircle className="w-3 h-3" />}
-                            {factura.estado === 'emitida' && <Clock className="w-3 h-3" />}
-                            {factura.estado === 'anulada' && <AlertTriangle className="w-3 h-3" />}
-                            {factura.estado}
-                          </span>
-                          <span className="text-[9px] font-mono text-gray-400">
-                            {factura.estado === 'anulada'
-                              ? 'BAJA RA ENVIADA'
-                              : factura.detalles?.modoTributario === 'interno_sin_ruc'
-                              ? 'CONTROL INTERNO'
-                              : 'CDR SUNAT: ACEPTADO'}
-                          </span>
+                          {factura.estado === 'anulada' ? (
+                            <>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-2 py-0.5 rounded-md">
+                                <AlertTriangle className="w-3 h-3" />
+                                ANULADA
+                              </span>
+                              <span className="text-[9px] font-mono text-rose-500 font-bold">
+                                BAJA RA ENVIADA
+                              </span>
+                            </>
+                          ) : yaValidado ? (
+                            <>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-md border border-emerald-300 dark:border-emerald-800 shadow-xs">
+                                <CheckCircle className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                VALIDADO SUNAT
+                              </span>
+                              <span className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                                {factura.detalles?.ticketSunat ? `Ticket: ${factura.detalles.ticketSunat}` : 'CDR: ACEPTADO'}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-800">
+                                <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                FALTA VALIDAR
+                              </span>
+                              <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400 font-bold">
+                                PENDIENTE SUNAT
+                              </span>
+                            </>
+                          )}
                         </div>
                       </td>
 
@@ -2207,16 +2555,31 @@ export const BovedaFacturasView: React.FC = () => {
                             CDR
                           </button>
 
-                          {/* Verificar Validez en SUNAT Sandbox (Botón con Escudo Verde) */}
-                          <button
-                            type="button"
-                            onClick={() => handleVerificarFacturaEnSunat(factura)}
-                            title="Consultar y validar estado del comprobante en SUNAT Sandbox"
-                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
-                          >
-                            <ShieldCheck className="w-3.5 h-3.5" />
-                            Validar SUNAT
-                          </button>
+                          {/* Estado de Validación SUNAT & Botón Validar */}
+                          {yaValidado ? (
+                            <span 
+                              title={`Comprobante validado ante SUNAT (Ticket: ${factura.detalles?.ticketSunat || 'VAL-SUNAT'})`}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 text-[10px] font-black flex items-center gap-1 border border-emerald-200 dark:border-emerald-800 shadow-xs"
+                            >
+                              <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                              Validado
+                            </span>
+                          ) : factura.estado !== 'anulada' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleValidarFacturaSunat(factura)}
+                              disabled={validatingId === factura.id}
+                              title="Validar comprobante en SUNAT y transferir a la lista de Validadas"
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-[10px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-xs disabled:opacity-50"
+                            >
+                              {validatingId === factura.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                              )}
+                              Validar SUNAT
+                            </button>
+                          ) : null}
 
                           {/* Comunicación de Baja (RA) / Delete */}
                           {factura.estado !== 'anulada' ? (
@@ -2248,10 +2611,47 @@ export const BovedaFacturasView: React.FC = () => {
                 })
               ) : (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-gray-400 dark:text-zinc-500 space-y-3">
-                    <p className="text-xs font-bold">
-                      No se encontraron comprobantes registrados en el mes/filtro seleccionado ({filterMonth === 'todos' ? 'Todos' : MONTH_LABELS[filterMonth]} {filterYear}).
-                    </p>
+                  <td colSpan={sunatListTab === 'por_validar' ? 8 : 7} className="py-10 text-center text-gray-400 dark:text-zinc-500 space-y-3">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      {sunatListTab === 'por_validar' ? (
+                        <>
+                          <CheckCircle className="w-8 h-8 text-emerald-500" />
+                          <p className="text-xs font-bold text-slate-700 dark:text-zinc-200">
+                            ¡Excelente! No hay comprobantes pendientes de validar en este filtro.
+                          </p>
+                          <p className="text-[11px] text-gray-400">
+                            Todos los comprobantes correspondientes a este periodo ya están registrados en la lista de Validadas de SUNAT.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setSunatListTab('validadas')}
+                            className="px-3.5 py-1.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                          >
+                            Ver Facturas Validadas ({countValidadas}) →
+                          </button>
+                        </>
+                      ) : sunatListTab === 'validadas' ? (
+                        <>
+                          <ShieldCheck className="w-8 h-8 text-amber-500" />
+                          <p className="text-xs font-bold text-slate-700 dark:text-zinc-200">
+                            Aún no hay comprobantes validados en el filtro seleccionado.
+                          </p>
+                          {countPorValidar > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setSunatListTab('por_validar')}
+                              className="px-3.5 py-1.5 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors cursor-pointer"
+                            >
+                              Ir a comprobantes que falta validar ({countPorValidar}) →
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-xs font-bold">
+                          No se encontraron comprobantes registrados en el mes/filtro seleccionado ({filterMonth === 'todos' ? 'Todos' : MONTH_LABELS[filterMonth]} {filterYear}).
+                        </p>
+                      )}
+                    </div>
                     {facturas.length > 0 && (
                       <button
                         type="button"
@@ -2264,8 +2664,8 @@ export const BovedaFacturasView: React.FC = () => {
                         }}
                         className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
                       >
-                        <Calendar className="w-3.5 h-3.5" />
-                        Ver todas las facturas de todos los meses ({facturas.length})
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Restablecer todos los filtros (Ver todos los meses y años)
                       </button>
                     )}
                   </td>

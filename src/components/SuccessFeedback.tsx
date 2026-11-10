@@ -22,7 +22,7 @@ export const SuccessFeedback: React.FC<SuccessFeedbackProps> = ({ type, message,
   }, [onClose]);
 
   // SVG drawing checkmark configuration
-  const draw = {
+  const draw: any = {
     hidden: { pathLength: 0, opacity: 0 },
     visible: {
       pathLength: 1,

@@ -110,6 +110,7 @@ interface AppContextType {
   
   facturas: Factura[];
   addFactura: (facturaData: Omit<Factura, 'id' | 'created_at'>) => Promise<Factura>;
+  updateFactura: (id: string, updates: Partial<Factura>) => Promise<void>;
   updateFacturaStatus: (id: string, status: 'emitida' | 'pagada' | 'anulada') => Promise<void>;
   deleteFactura: (id: string) => Promise<void>;
   vaultPasscode: string;
@@ -4123,6 +4124,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newFactura;
   };
 
+  const updateFactura = async (id: string, updates: Partial<Factura>) => {
+    let mergedFactura: Factura | null = null;
+    setFacturas(prev => {
+      const updated = prev.map(f => {
+        if (f.id === id) {
+          const merged: Factura = {
+            ...f,
+            ...updates,
+            detalles: {
+              ...(f.detalles || {}),
+              ...(updates.detalles || {})
+            }
+          };
+          mergedFactura = merged;
+          return merged;
+        }
+        return f;
+      });
+      try {
+        localStorage.setItem('edu_facturas', JSON.stringify(updated));
+      } catch (err) {
+        console.warn("Could not save updated facturas in localStorage:", err);
+      }
+      return updated;
+    });
+
+    try {
+      const payload: Record<string, any> = {};
+      if (updates.estado) payload.estado = updates.estado;
+      if (updates.monto !== undefined) payload.monto = updates.monto;
+      if (updates.concepto) payload.concepto = updates.concepto;
+      if (mergedFactura && (mergedFactura as Factura).detalles) {
+        payload.detalles = (mergedFactura as Factura).detalles;
+      }
+      if (Object.keys(payload).length > 0) {
+        await supabase.from('facturas').update(payload).eq('id', id);
+      }
+    } catch (e) {
+      console.warn("Could not sync invoice update with Supabase:", e);
+    }
+  };
+
   const updateFacturaStatus = async (id: string, status: 'emitida' | 'pagada' | 'anulada') => {
     setFacturas(prev => {
       const updated = prev.map(f => f.id === id ? { ...f, estado: status } : f);
@@ -4312,6 +4355,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setUploadProgress,
       facturas,
       addFactura,
+      updateFactura,
       updateFacturaStatus,
       deleteFactura,
       vaultPasscode,

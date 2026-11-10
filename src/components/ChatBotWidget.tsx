@@ -825,7 +825,7 @@ export const ChatBotWidget: React.FC = () => {
                     type="button"
                     onClick={() => setActiveTab("messages")}
                     className={`flex flex-col items-center gap-1 py-1 px-5 rounded-xl transition-all cursor-pointer ${
-                      activeTab === "messages" 
+                      (activeTab as string) === "messages" 
                         ? "text-indigo-600 dark:text-indigo-400 font-black" 
                         : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 font-bold"
                     }`}
@@ -951,7 +951,7 @@ export const ChatBotWidget: React.FC = () => {
                     type="button"
                     onClick={() => setActiveTab("home")}
                     className={`flex flex-col items-center gap-1 py-1 px-5 rounded-xl transition-all cursor-pointer ${
-                      activeTab === "home" 
+                      (activeTab as string) === "home" 
                         ? "text-indigo-600 dark:text-indigo-400 font-black" 
                         : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 font-bold"
                     }`}

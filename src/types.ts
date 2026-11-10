@@ -228,7 +228,7 @@ export interface Factura {
     nombreEstudiante?: string;
     apellidoEstudiante?: string;
     contactoEstudiante?: string | number;
-    nombrePersona: string;
+    nombrePersona?: string;
     clasesDictadas?: number;
     tarifaPorClase?: number;
     cursosVinculados?: string[];
@@ -254,7 +254,9 @@ export interface Factura {
     montoEnLetras?: string;
     hashCpe?: string;
     qrCadena?: string;
-    estadoSunat?: 'ACEPTADO' | 'CONTROL_INTERNO' | 'BAJA_COMUNICADA' | 'RESUMEN_ENVIADO';
+    estadoSunat?: 'ACEPTADO' | 'CONTROL_INTERNO' | 'BAJA_COMUNICADA' | 'RESUMEN_ENVIADO' | 'PENDIENTE_VALIDACION' | 'VALIDADO';
+    validadoSunat?: boolean;
+    fechaValidacionSunat?: string;
     codigoRespuestaSunat?: string;
     mensajeSunat?: string;
     ticketSunat?: string;
