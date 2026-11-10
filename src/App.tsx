@@ -80,8 +80,23 @@ function AppContent() {
     markNotificationAsRead,
     changeTeacherPassword
   } = useApp();
-  const cl = getThemeClasses(theme.accentColor);
-  const [activeTab, setActiveTab] = useState<string>('inicio');
+  const [activeTab, setActiveTabState] = useState<string>(() => {
+    try {
+      return localStorage.getItem('edu_active_tab') || 'inicio';
+    } catch {
+      return 'inicio';
+    }
+  });
+
+  const setActiveTab = (tab: string) => {
+    try {
+      localStorage.setItem('edu_active_tab', tab);
+    } catch (e) {
+      // ignore
+    }
+    setActiveTabState(tab);
+  };
+
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: '', visible: false });
   const [showLoginScreen, setShowLoginScreen] = useState(false);

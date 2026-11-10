@@ -267,7 +267,25 @@ npm run dev
 ```
 La aplicación estará disponible en `http://localhost:3000`.
 
-### 5. Compilación para Producción
+### 5. Limpieza de Datos (Mantenimiento)
+Para reiniciar el año escolar o vaciar datos de prueba manteniendo **100% intactas las cuentas de usuarios (profesores y administradores)**:
+
+- **Opción A (Recomendada - Supabase SQL Editor)**:
+  1. Abre tu panel de Supabase y ve a **SQL Editor**.
+  2. Pega el contenido de `limpiar_datos_excepto_usuarios.sql` y pulsa **Run**.
+  3. Esto vaciará estudiantes, notas, asistencias, sesiones, facturas y finanzas con `CASCADE` protegiendo la tabla `usuarios`.
+
+- **Opción B (Línea de comandos Node/TypeScript)**:
+  ```bash
+  npm run db:clean
+  ```
+
+- **Opción C (Interfaz Web)**:
+  Ingresa al portal como Administrador > **Ajustes** > **Limpieza y Mantenimiento de Datos** > Clic en **Ejecutar Limpieza en Vivo** (o copiar/descargar el script SQL).
+
+---
+
+### 6. Compilación para Producción
 ```bash
 npm run build
 npm run start

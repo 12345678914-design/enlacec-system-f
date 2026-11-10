@@ -16,6 +16,8 @@ import { SuccessFeedback } from '../SuccessFeedback';
 import { TeslaAIChatView } from './TeslaAIChatView';
 import { NewsAnnouncementsView } from './NewsAnnouncementsView';
 import { BovedaFacturasView } from './BovedaFacturasView';
+import { AdminAsistenciasView } from './AdminAsistenciasView';
+import { ReloadSupabaseButton } from '../ReloadSupabaseButton';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { VercelEnvConfigCard } from '../VercelEnvConfigCard';
 import { SkeletonSummaryCard } from '../Skeleton';
@@ -85,7 +87,12 @@ import {
   Receipt,
   Loader2,
   CheckCircle,
-  Check
+  Check,
+  Database,
+  Copy,
+  AlertTriangle,
+  ShieldCheck,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -106,7 +113,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
     cursos, servicios, servicioCursos, servicioProfesores,
     addCourse, updateCourse, deleteCourse, addService, updateService, deleteService, linkCourseToService, unlinkCourseFromService, linkTeacherToService, unlinkTeacherFromService,
     notas, addNota, updateNota, deleteNota,
-    vaultPasscode, setVaultPasscode, addFactura
+    vaultPasscode, setVaultPasscode, addFactura,
+    clearDataExceptUsers, reloadAllData
   } = useApp();
 
   const cl = getThemeClasses(theme.accentColor);
@@ -304,6 +312,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
   const [finCpeMonto, setFinCpeMonto] = useState('250.00');
   const [isCheckingFinCpe, setIsCheckingFinCpe] = useState(false);
   const [finCpeResult, setFinCpeResult] = useState<SunatValidezResult | null>(null);
+
+  // Database maintenance & purge states (preserves usuarios)
+  const [showCleanDbModal, setShowCleanDbModal] = useState(false);
+  const [cleanConfirmText, setCleanConfirmText] = useState('');
+  const [isCleaningDb, setIsCleaningDb] = useState(false);
+  const [cleanDbSuccessMsg, setCleanDbSuccessMsg] = useState('');
+  const [copiedSql, setCopiedSql] = useState(false);
 
   const handleLookupDni = async (dni: string, isForTeacher: boolean = false, isEdit: boolean = false) => {
     const cleanDoc = (dni || '').trim().replace(/\D/g, '');
@@ -7005,6 +7020,230 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
           </div>
         </div>
 
+        {/* Database Purge & Maintenance (Strictly Preserves Usuarios) */}
+        <div className="space-y-3 pt-3 border-t border-gray-100 dark:border-zinc-800/60">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Database className="w-4 h-4 text-rose-500" />
+              <label className="text-xs font-bold text-gray-900 dark:text-zinc-100 uppercase tracking-wide">
+                Limpieza y Mantenimiento de Datos
+              </label>
+            </div>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+              <ShieldCheck className="w-3 h-3" />
+              Protege Usuarios
+            </span>
+          </div>
+
+          <div className="p-4 bg-rose-500/5 dark:bg-rose-950/20 rounded-xl border border-rose-200/60 dark:border-rose-900/40 space-y-3.5">
+            <div className="space-y-1">
+              <span className="text-xs font-bold block text-rose-700 dark:text-rose-300">
+                Limpiar datos actuales (Estudiantes, Notas, Facturas, Finanzas, etc.)
+              </span>
+              <p className="text-[11px] text-gray-700 dark:text-zinc-300 leading-relaxed">
+                Este script vacía todos los registros operativos del colegio (estudiantes matriculados, notas, asistencias, sesiones, comprobantes de bóveda, caja chica, cursos y recursos).
+              </p>
+              <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 leading-relaxed flex items-center gap-1.5 mt-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>La tabla <code className="bg-emerald-100 dark:bg-emerald-950 px-1 py-0.5 rounded font-mono font-bold">usuarios</code> (profesores, administradores, contraseñas y perfiles) se preserva al 100%.</span>
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const sqlContent = `-- SCRIPT DE LIMPIEZA TOTAL DE DATOS (PRESERVANDO TABLA USUARIOS)
+DO $$
+DECLARE
+    tbl_name text;
+    tables_to_truncate text[] := ARRAY[
+        'asistencia_estudiantes', 'attendance_records', 'attendance', 'sesiones',
+        'notas',
+        'servicio_estudiante', 'estudiante_servicio', 'estudiantes_servicios', 'estudiantes_cursos',
+        'servicio_profesor', 'servicio_curso', 'servicio_cursos', 'curso_profesor', 'espcialidades_profesor',
+        'prestaciones', 'recuperacion', 'historial',
+        'facturas',
+        'movimientos', 'movimientos_financieros', 'transactions', 'caja',
+        'recursos', 'resources', 'categorias',
+        'eventos_noticias', 'news', 'notifications',
+        'estudiantes', 'students', 'servicio', 'cursos', 'especialidades',
+        'codigo_acceso_boveda', 'boveda_codigos'
+    ];
+BEGIN
+    FOREACH tbl_name IN ARRAY tables_to_truncate LOOP
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = tbl_name) THEN
+            EXECUTE format('TRUNCATE TABLE public.%I RESTART IDENTITY CASCADE;', tbl_name);
+            RAISE NOTICE 'Tabla limpiada: %', tbl_name;
+        END IF;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'codigo_acceso_boveda') THEN
+        INSERT INTO public.codigo_acceso_boveda (codigo) VALUES ('1234');
+    END IF;
+    RAISE NOTICE 'Limpieza completada. La tabla usuarios se mantuvo 100%% intacta.';
+END $$;
+SELECT 'usuarios' AS tabla, COUNT(*) AS registros_conservados FROM usuarios;
+`;
+                  navigator.clipboard.writeText(sqlContent);
+                  setCopiedSql(true);
+                  setTimeout(() => setCopiedSql(false), 3000);
+                }}
+                className="px-3 py-1.5 bg-white dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-700 text-gray-800 dark:text-zinc-200 border border-gray-200 dark:border-zinc-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedSql ? '¡SQL Copiado!' : 'Copiar Script SQL'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const blob = new Blob([`-- ==============================================================================
+-- SCRIPT DE LIMPIEZA TOTAL DE DATOS (PRESERVANDO LA TABLA USUARIOS)
+-- ==============================================================================
+DO $$
+DECLARE
+    tbl_name text;
+    tables_to_truncate text[] := ARRAY[
+        'asistencia_estudiantes', 'attendance_records', 'attendance', 'sesiones',
+        'notas',
+        'servicio_estudiante', 'estudiante_servicio', 'estudiantes_servicios', 'estudiantes_cursos',
+        'servicio_profesor', 'servicio_curso', 'servicio_cursos', 'curso_profesor', 'espcialidades_profesor',
+        'prestaciones', 'recuperacion', 'historial',
+        'facturas',
+        'movimientos', 'movimientos_financieros', 'transactions', 'caja',
+        'recursos', 'resources', 'categorias',
+        'eventos_noticias', 'news', 'notifications',
+        'estudiantes', 'students', 'servicio', 'cursos', 'especialidades',
+        'codigo_acceso_boveda', 'boveda_codigos'
+    ];
+BEGIN
+    FOREACH tbl_name IN ARRAY tables_to_truncate LOOP
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = tbl_name) THEN
+            EXECUTE format('TRUNCATE TABLE public.%I RESTART IDENTITY CASCADE;', tbl_name);
+            RAISE NOTICE 'Tabla limpiada: %', tbl_name;
+        END IF;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'codigo_acceso_boveda') THEN
+        INSERT INTO public.codigo_acceso_boveda (codigo) VALUES ('1234');
+    END IF;
+    RAISE NOTICE 'Limpieza completada. La tabla usuarios se mantuvo 100%% intacta.';
+END $$;
+SELECT 'usuarios' AS tabla, COUNT(*) AS registros_conservados FROM usuarios;
+`], { type: 'text/sql' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'limpiar_datos_excepto_usuarios.sql';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="px-3 py-1.5 bg-white dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-700 text-gray-800 dark:text-zinc-200 border border-gray-200 dark:border-zinc-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Download className="w-3.5 h-3.5 text-blue-500" />
+                Descargar .SQL
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCleanConfirmText('');
+                  setCleanDbSuccessMsg('');
+                  setShowCleanDbModal(true);
+                }}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Ejecutar Limpieza en Vivo
+              </button>
+            </div>
+
+            {cleanDbSuccessMsg && (
+              <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 p-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                {cleanDbSuccessMsg}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Modal de confirmación de limpieza segura */}
+        {showCleanDbModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <div className="bg-white dark:bg-zinc-900 border border-rose-200 dark:border-rose-900 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950 flex items-center justify-center text-rose-600 shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-zinc-100">
+                    Confirmar Limpieza de Base de Datos
+                  </h4>
+                  <p className="text-xs text-gray-600 dark:text-zinc-300">
+                    Esta acción vaciará estudiantes, notas, facturas y finanzas.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                <span className="font-bold flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  Garantía de Preservación de Usuarios
+                </span>
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                  La tabla <code className="font-bold">usuarios</code> (todos los docentes, directores, cuentas de administrador, contraseñas y teléfonos) <strong>NO</strong> será alterada ni eliminada.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-gray-700 dark:text-zinc-300">
+                  Para confirmar, escribe la palabra <strong className="text-rose-600 font-mono">LIMPIAR</strong> a continuación:
+                </label>
+                <input
+                  type="text"
+                  value={cleanConfirmText}
+                  onChange={(e) => setCleanConfirmText(e.target.value)}
+                  placeholder="Escribe LIMPIAR"
+                  className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-rose-500 font-mono uppercase"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isCleaningDb}
+                  onClick={() => setShowCleanDbModal(false)}
+                  className="px-3.5 py-2 text-xs font-semibold text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={cleanConfirmText.trim().toUpperCase() !== 'LIMPIAR' || isCleaningDb}
+                  onClick={async () => {
+                    setIsCleaningDb(true);
+                    try {
+                      const res = await clearDataExceptUsers();
+                      if (res.success) {
+                        setCleanDbSuccessMsg('✅ Base de datos limpiada exitosamente. Todas las cuentas de usuarios fueron preservadas.');
+                        setShowCleanDbModal(false);
+                      } else {
+                        alert('Aviso: ' + res.message);
+                      }
+                    } catch (e: any) {
+                      alert('Error: ' + (e?.message || 'Error al ejecutar limpieza.'));
+                    } finally {
+                      setIsCleaningDb(false);
+                    }
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isCleaningDb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  Confirmar y Limpiar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="pt-4 border-t border-gray-100 dark:border-zinc-850 flex items-center justify-between text-xs text-gray-450 font-mono">
           <span>Licenciado para: Directiva Colegio</span>
           <span className="font-bold text-gray-400">ENLACEC Prod</span>
@@ -8027,6 +8266,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
         return renderEstudiantesValue();
       case 'docentes':
         return renderDocentesValue();
+      case 'asistencias':
+        return <AdminAsistenciasView onChangeTab={onChangeTab} />;
       case 'cursos':
         return renderCursosValue();
       case 'servicios':

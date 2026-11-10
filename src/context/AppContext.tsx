@@ -114,6 +114,8 @@ interface AppContextType {
   deleteFactura: (id: string) => Promise<void>;
   vaultPasscode: string;
   setVaultPasscode: (code: string) => void;
+  clearDataExceptUsers: () => Promise<{ success: boolean; message: string }>;
+  reloadAllData: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -353,6 +355,31 @@ const INITIAL_TEACHERS: Teacher[] = [
     activeCourses: ['10° Grado A', '10° Grado B', '11° Grado B'],
     avatarUrl: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=120',
     rating: 4.5
+  },
+  {
+    id: 'e81a3d92-6721-4f12-9c31-ee51ffaf4201',
+    nombre: 'Enrique',
+    apellido: 'Gonzales',
+    edad: 39,
+    dni: 'DNI44556677',
+    telefono: 987654320,
+    codigo: 'DOC-004',
+    foto_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120',
+    fecha_vencimiento: 2029,
+    password: 'docente123',
+    si_pass: false,
+    activado: true,
+    rol: 'docente',
+    created_at: '2026-06-04T08:00:00.000Z',
+    name: 'Prof. enrique gonzales',
+    email: 'enrique.gonzales@sistema.edu',
+    subject: 'Ciencias Exactas',
+    phone: '+51 987 654 320',
+    salary: 2000,
+    paymentStatus: 'pending',
+    activeCourses: ['ALGEBRA', 'ARITMETICA', 'FISICA'],
+    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120',
+    rating: 4.9
   }
 ];
 
@@ -668,6 +695,25 @@ const INITIAL_ATTENDANCE: AttendanceRecord[] = [
       { studentId: 'EST-005', studentName: 'Valentina Díaz', present: true }
     ],
     comments: 'Sofía Valentino llegó tarde con justificación firmada por su apoderado.'
+  },
+  {
+    id: 'ATT-007',
+    teacherId: 'e81a3d92-6721-4f12-9c31-ee51ffaf4201',
+    teacherName: 'Prof. enrique gonzales',
+    course: 'PREPARACION DE INGRESO (ALGEBRA)',
+    date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-18`,
+    time: '15:00',
+    inicio: '15:00',
+    fin: '18:20',
+    cantidadSesiones: 1,
+    monto: 300.00,
+    estado: null,
+    students: [
+      { studentId: 'EST-001', studentName: 'Sofía Valentino', present: true },
+      { studentId: 'EST-002', studentName: 'Mateo Quispe', present: true },
+      { studentId: 'EST-003', studentName: 'Camila Rojas', present: true }
+    ],
+    comments: 'Sesión intensiva de preparación preuniversitaria - Métodos de factorización y polinomios.'
   }
 ];
 
@@ -1185,25 +1231,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Default courses and services constants
+  // Default courses and services constants (Includes user predefined curricula)
   const DEFAULT_CURSOS: Course[] = [
+    { id: 'cur-rm', nombre: 'RAZONAMIENTO MATEMATICO', descripcion: 'Sin descripción', pago: 20.0 },
+    { id: 'cur-rv', nombre: 'RAZONAMIENTO VERBAL', descripcion: 'Sin descripción', pago: 20.0 },
+    { id: 'cur-alg', nombre: 'ALGEBRA', descripcion: 'Sin descripción', pago: 25.0 },
+    { id: 'cur-ari', nombre: 'ARITMETICA', descripcion: 'Sin descripción', pago: 25.0 },
+    { id: 'cur-fis', nombre: 'FISICA', descripcion: 'Sin descripción', pago: 30.0 },
+    { id: 'cur-qui', nombre: 'QUIMICA', descripcion: 'Sin descripción', pago: 30.0 },
+    { id: 'cur-lit', nombre: 'LITERATURA', descripcion: 'Sin descripción', pago: 25.0 },
     { id: 'cur-mat', nombre: 'Reforzamiento de Matemática', descripcion: 'Clases intensivas de álgebra, aritmética y geometría', pago: 25.0 },
-    { id: 'cur-lec', nombre: 'Reforzamiento de Lectora', descripcion: 'Comprensión lectora y análisis de de textos', pago: 20.0 },
+    { id: 'cur-lec', nombre: 'Reforzamiento de Lectora', descripcion: 'Comprensión lectora y análisis de textos', pago: 20.0 },
     { id: 'cur-rob', nombre: 'Taller de Robótica', descripcion: 'Introducción a la programación y circuitos electrónicos', pago: 30.0 },
     { id: 'cur-ing', nombre: 'Inglés Intensivo', descripcion: 'Gramática, vocabulario y expresión oral', pago: 22.0 }
   ];
 
   const DEFAULT_SERVICIOS: Service[] = [
-    { id: 'ser-ref-pri', nombre: 'Reforzamiento Primaria', descripcion: 'Nivelación integral para alumnos de educación primaria' },
-    { id: 'ser-ref-sec', nombre: 'Reforzamiento Secundaria', descripcion: 'Preparación avanzada para alumnos de educación secundaria' },
-    { id: 'ser-talleres', nombre: 'Talleres Extracurriculares', descripcion: 'Desarrollo de habilidades tecnológicas y científicas' }
+    { 
+      id: 'ser-prep-ingreso', 
+      nombre: 'PREPARACION DE INGRESO', 
+      descripcion: 'Sin descripción detallada.',
+      duracion: 200,
+      pago: 300.0
+    },
+    { id: 'ser-ref-pri', nombre: 'Reforzamiento Primaria', descripcion: 'Nivelación integral para alumnos de educación primaria', duracion: 120, pago: 200.0 },
+    { id: 'ser-ref-sec', nombre: 'Reforzamiento Secundaria', descripcion: 'Preparación avanzada para alumnos de educación secundaria', duracion: 180, pago: 280.0 },
+    { id: 'ser-talleres', nombre: 'Talleres Extracurriculares', descripcion: 'Desarrollo de habilidades tecnológicas y científicas', duracion: 90, pago: 150.0 }
   ];
 
   const DEFAULT_SERVICIO_CURSOS: ServiceCourse[] = [
+    { id: 'sc-prep-1', servicio_id: 'ser-prep-ingreso', curso_id: 'cur-alg' },
+    { id: 'sc-prep-2', servicio_id: 'ser-prep-ingreso', curso_id: 'cur-ari' },
+    { id: 'sc-prep-3', servicio_id: 'ser-prep-ingreso', curso_id: 'cur-fis' },
     { id: 'sc-1', servicio_id: 'ser-ref-pri', curso_id: 'cur-mat' },
     { id: 'sc-2', servicio_id: 'ser-ref-pri', curso_id: 'cur-lec' },
     { id: 'sc-3', servicio_id: 'ser-ref-sec', curso_id: 'cur-mat' },
     { id: 'sc-4', servicio_id: 'ser-ref-sec', curso_id: 'cur-ing' },
     { id: 'sc-5', servicio_id: 'ser-talleres', curso_id: 'cur-rob' }
+  ];
+
+  const DEFAULT_SERVICIO_PROFESORES: ServiceTeacher[] = [
+    { 
+      id: 'sp-prep-1', 
+      id_servicio: 'ser-prep-ingreso', 
+      id_profesor: 'e81a3d92-6721-4f12-9c31-ee51ffaf4201',
+      servicio_id: 'ser-prep-ingreso', 
+      profesor_id: 'e81a3d92-6721-4f12-9c31-ee51ffaf4201' 
+    }
   ];
 
   const [cursos, setCursos] = useState<Course[]>(() => {
@@ -1223,7 +1297,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [servicioProfesores, setServicioProfesores] = useState<ServiceTeacher[]>(() => {
     const saved = localStorage.getItem('edu_servicio_profesores');
-    return saved ? JSON.parse(saved) : [];
+    return saved ? JSON.parse(saved) : DEFAULT_SERVICIO_PROFESORES;
   });
 
   const [notas, setNotas] = useState<Nota[]>(() => {
@@ -4065,6 +4139,104 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const clearDataExceptUsers = async (): Promise<{ success: boolean; message: string }> => {
+    try {
+      const nonUserTables = [
+        'asistencia_estudiantes',
+        'attendance_records',
+        'attendance',
+        'sesiones',
+        'notas',
+        'servicio_estudiante',
+        'estudiante_servicio',
+        'estudiantes_servicios',
+        'estudiantes_cursos',
+        'servicio_profesor',
+        'servicio_curso',
+        'servicio_cursos',
+        'curso_profesor',
+        'espcialidades_profesor',
+        'prestaciones',
+        'recuperacion',
+        'historial',
+        'facturas',
+        'movimientos',
+        'movimientos_financieros',
+        'transactions',
+        'caja',
+        'recursos',
+        'resources',
+        'categorias',
+        'eventos_noticias',
+        'news',
+        'notifications',
+        'estudiantes',
+        'students',
+        'servicio',
+        'cursos',
+        'especialidades'
+      ];
+
+      for (const t of nonUserTables) {
+        try {
+          await supabase.from(t).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        } catch {
+          // Continue if table doesn't exist or is governed by restrictive policy
+        }
+      }
+
+      // Reset boveda to default 1234
+      try {
+        await supabase.from('codigo_acceso_boveda').insert([{ codigo: '1234' }]);
+      } catch {
+        // optional
+      }
+
+      // Reset local state (EXCEPT teachers and currentUser!)
+      setStudents([]);
+      setCursos([]);
+      setServicios([]);
+      setServicioCursos([]);
+      setServicioProfesores([]);
+      setNotas([]);
+      setAttendance([]);
+      setTransactions([]);
+      setBalance(0);
+      setFacturas([]);
+      setNews([]);
+      setResources([]);
+
+      // Reset localStorage for operational tables
+      localStorage.setItem('edu_students', JSON.stringify([]));
+      localStorage.setItem('edu_resources', JSON.stringify([]));
+      localStorage.setItem('edu_transactions', JSON.stringify([]));
+      localStorage.setItem('edu_attendance', JSON.stringify([]));
+      localStorage.setItem('edu_news', JSON.stringify([]));
+      localStorage.setItem('edu_facturas', JSON.stringify([]));
+      localStorage.setItem('edu_cursos', JSON.stringify([]));
+      localStorage.setItem('edu_servicios', JSON.stringify([]));
+      localStorage.setItem('edu_servicio_cursos', JSON.stringify([]));
+      localStorage.setItem('edu_servicio_profesores', JSON.stringify([]));
+      localStorage.setItem('edu_notas', JSON.stringify([]));
+
+      addNotification({
+        title: '🧹 Limpieza de Base de Datos',
+        content: 'Todos los datos operativos (estudiantes, notas, facturas, finanzas y cursos) fueron limpiados. La tabla usuarios permanece intacta.',
+        type: 'success'
+      });
+
+      return {
+        success: true,
+        message: 'Base de datos limpiada con éxito. Todos los usuarios fueron preservados.'
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err?.message || 'Error durante la limpieza.'
+      };
+    }
+  };
+
   return (
     <AppContext.Provider value={{
       currentUser,
@@ -4131,7 +4303,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateFacturaStatus,
       deleteFactura,
       vaultPasscode,
-      setVaultPasscode
+      setVaultPasscode,
+      clearDataExceptUsers,
+      reloadAllData: loadData
     }}>
       {children}
     </AppContext.Provider>

@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { getThemeClasses } from '../lib/themeUtils';
 import { UserAvatar } from './UserAvatar';
+import { ReloadSupabaseButton } from './ReloadSupabaseButton';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Bell, 
@@ -496,6 +497,9 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileSidebar, activeTab
             )}
           </AnimatePresence>
         </div>
+
+        {/* Supabase Sync Button */}
+        <ReloadSupabaseButton showDatabaseBadge={true} label="Sincronizar" />
 
         {/* Quick theme toggler */}
         <button

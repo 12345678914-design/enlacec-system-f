@@ -156,6 +156,10 @@ export interface ServiceTeacher {
   id_servicio: string;
   id_profesor: string;
   created_at?: string;
+  servicio_id?: string;
+  profesor_id?: string;
+  servicioId?: string;
+  teacherId?: string;
 }
 
 export type AccentColor = 'blue' | 'emerald' | 'purple' | 'amber' | 'rose' | 'indigo' | 'orange' | 'teal' | 'fuchsia' | 'violet';

@@ -38,8 +38,12 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, activeTab, onChangeTab }) => {
-  const { currentUser, logout, theme } = useApp();
+  const { currentUser, logout, theme, attendance } = useApp();
   const cl = getThemeClasses(theme.accentColor);
+
+  const pendingAttendanceCount = attendance?.filter(
+    a => a.estado === null || a.estado === undefined || (a.estado as any) === 'PENDIENTE'
+  ).length || 0;
 
   // States for desktop hover expansion and responsive setting
   const [isHovered, setIsHovered] = React.useState(false);
@@ -74,6 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, activeTab, on
         { id: 'tesla-ai', label: 'TESLA AI', icon: Cpu },
         { id: 'estudiantes', label: 'Estudiantes', icon: GraduationCap },
         { id: 'docentes', label: 'Docentes', icon: Users },
+        { id: 'asistencias', label: 'Asistencias', icon: CalendarCheck, badge: pendingAttendanceCount },
         { id: 'cursos', label: 'Cursos', icon: BookOpen },
         { id: 'servicios', label: 'Servicios', icon: Layers },
         { id: 'recursos', label: 'Recursos', icon: FolderOpen },
@@ -191,6 +196,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, activeTab, on
                   {expanded && (
                     <div className="flex-1 flex items-center justify-between min-w-0">
                       <span className="truncate">{item.label}</span>
+                      {(item as any).badge > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-xs font-mono ml-1.5 shrink-0 animate-pulse">
+                          {(item as any).badge}
+                        </span>
+                      ) : null}
                       {item.id === 'tesla-ai' && (
                         <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-bold font-mono text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800/60 border border-gray-200 dark:border-zinc-700/60 rounded-md shadow-sm select-none uppercase tracking-normal">
                           <span className="text-[10px]">Ctrl</span>
@@ -199,6 +209,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, activeTab, on
                         </kbd>
                       )}
                     </div>
+                  )}
+                  {!expanded && (item as any).badge > 0 && (
+                    <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-zinc-900 animate-pulse" />
                   )}
                 </button>
               );
