@@ -18,6 +18,7 @@ import { getThemeClasses } from './lib/themeUtils';
 import { ChatBotWidget } from './components/ChatBotWidget';
 import { SplashLoader } from './components/SplashLoader';
 import { UploadProgressModal } from './components/UploadProgressModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const FloatingNotificationItem: React.FC<{
   notification: any;
@@ -315,15 +316,17 @@ function AppContent() {
         />
 
         <main ref={mainRef} className={`flex-1 ${activeTab === 'pizarra' || activeTab === 'tesla-ai' ? 'overflow-hidden flex flex-col min-h-0' : 'overflow-y-auto'} bg-white/5 dark:bg-slate-900/30 transition-colors duration-300`}>
-          {activeTab === 'perfil' ? (
-            <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
-              <Perfil />
-            </div>
-          ) : currentUser.role === 'admin' ? (
-            <AdminDashboard activeTab={activeTab} onChangeTab={setActiveTab} />
-          ) : (
-            <DocenteDashboard activeTab={activeTab} onChangeTab={setActiveTab} />
-          )}
+          <ErrorBoundary fallbackTitle="Error inesperado al cargar la vista">
+            {activeTab === 'perfil' ? (
+              <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+                <Perfil />
+              </div>
+            ) : currentUser.role === 'admin' ? (
+              <AdminDashboard activeTab={activeTab} onChangeTab={setActiveTab} />
+            ) : (
+              <DocenteDashboard activeTab={activeTab} onChangeTab={setActiveTab} />
+            )}
+          </ErrorBoundary>
         </main>
       </div>
 

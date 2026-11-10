@@ -74,7 +74,7 @@ import {
   EstadoComprobanteNormalizado,
   FacturaValidadaSunat
 } from '../../lib/sunat';
-import { motion, AnimatePresence } from 'motion/react';
+
 import { Factura, Student, Teacher } from '../../types';
 
 export interface BovedaCodigo {
@@ -246,10 +246,29 @@ export const BovedaFacturasView: React.FC = () => {
   const [greSearchQuery, setGreSearchQuery] = useState('');
   const [greConsultaMsg, setGreConsultaMsg] = useState('');
 
-  const handleUnlock = (e: React.FormEvent) => {
+  const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanAttempt = passcodeAttempt.trim();
-    const currentPass = (vaultPasscode || '1234').trim();
+    let currentPass = (vaultPasscode || '1234').trim();
+
+    // Verificación en tiempo real con Supabase si no coincide con el estado en memoria
+    if (cleanAttempt !== currentPass) {
+      try {
+        const { data: latestDbRow } = await supabase
+          .from('codigo_acceso_boveda')
+          .select('codigo')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestDbRow && latestDbRow.codigo) {
+          currentPass = latestDbRow.codigo.trim();
+          setVaultPasscode(currentPass);
+        }
+      } catch (err) {
+        console.warn('Error comprobando codigo_acceso_boveda en tiempo real:', err);
+      }
+    }
 
     if (cleanAttempt === currentPass) {
       setIsUnlocked(true);
@@ -277,10 +296,26 @@ export const BovedaFacturasView: React.FC = () => {
     setChangePassError('');
     setChangePassSuccess('');
 
-    const currentPass = (vaultPasscode || '1234').trim();
+    let currentPass = (vaultPasscode || '1234').trim();
     if (currentPassInput.trim() !== currentPass) {
-      setChangePassError('La clave actual ingresada es incorrecta.');
-      return;
+      // Verificar con la tabla codigo_acceso_boveda
+      try {
+        const { data: latestDbRow } = await supabase
+          .from('codigo_acceso_boveda')
+          .select('codigo')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestDbRow && latestDbRow.codigo) {
+          currentPass = latestDbRow.codigo.trim();
+        }
+      } catch {}
+
+      if (currentPassInput.trim() !== currentPass) {
+        setChangePassError('La clave actual ingresada es incorrecta.');
+        return;
+      }
     }
 
     if (newPassInput.trim().length < 4) {
@@ -295,11 +330,15 @@ export const BovedaFacturasView: React.FC = () => {
 
     setIsSavingPasscode(true);
     try {
-      await setVaultPasscode(newPassInput.trim());
-      setChangePassSuccess('¡Clave de la Bóveda actualizada y registrada en la base de datos con éxito!');
+      const newCode = newPassInput.trim();
+      
+      // Guarda en el contexto y envía la fila a la tabla codigo_acceso_boveda
+      await setVaultPasscode(newCode);
+
+      setChangePassSuccess('¡Nuevo código registrado exitosamente en la tabla codigo_acceso_boveda!');
       addNotification({
-        title: 'Clave de Bóveda Actualizada',
-        content: 'La nueva contraseña ha sido guardada en la base de datos de forma segura.',
+        title: 'Código de Acceso Registrado',
+        content: `El nuevo código de acceso (${newCode}) ha sido registrado en la tabla codigo_acceso_boveda de Supabase.`,
         type: 'success'
       });
       setTimeout(() => {
@@ -584,42 +623,110 @@ export const BovedaFacturasView: React.FC = () => {
     }, 4000);
   };
 
-  // Filtered invoices (incluye filtro por Año y Mes, por defecto mes actual)
+  // Filtered invoices (optimizado: salida rápida y acceso 100% seguro a propiedades sin errores de undefined)
   const filteredFacturas = useMemo(() => {
+    if (!facturas || facturas.length === 0) return [];
+
+    const searchLower = (searchTerm || '').trim().toLowerCase();
+    const hasSearch = searchLower.length > 0;
+    const isYearAll = filterYear === 'todos';
+    const isMonthAll = filterMonth === 'todos';
+    const isTipoAll = filterTipo === 'todos';
+    const isEstadoAll = filterEstado === 'todos';
+    const isSunatAll = filterSunatValidadas === 'todos';
+
+    const now = new Date();
+    const defaultYear = String(now.getFullYear());
+    const defaultMonth = String(now.getMonth() + 1);
+
     return facturas.filter(f => {
-      const fDate = f.created_at ? new Date(f.created_at) : new Date();
-      const fYear = !isNaN(fDate.getTime()) ? String(fDate.getFullYear()) : String(new Date().getFullYear());
-      const fMonth = !isNaN(fDate.getTime()) ? String(fDate.getMonth() + 1) : String(new Date().getMonth() + 1);
+      if (!f) return false;
 
-      const matchesYear = filterYear === 'todos' || fYear === filterYear;
-      const matchesMonth = filterMonth === 'todos' || fMonth === filterMonth;
-
-      const matchesSearch = 
-        f.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (f.detalles.serieCorrelativo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        f.concepto.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        f.detalles.nombrePersona.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (f.detalles.dniDocente || '').includes(searchTerm) ||
-        (f.detalles.dniEstudiante || '').includes(searchTerm) ||
-        (f.detalles.docClienteNumero || '').includes(searchTerm);
-
-      const matchesTipo = filterTipo === 'todos' || f.tipo === filterTipo;
-      const matchesEstado = filterEstado === 'todos' || f.estado === filterEstado;
-
-      let matchesSunat = true;
-      if (filterSunatValidadas === 'validadas_sunat') {
-        matchesSunat =
-          f.estado !== 'anulada' &&
-          f.detalles?.modoTributario !== 'interno_sin_ruc' &&
-          (f.detalles?.estadoSunat === 'ACEPTADO' || !f.detalles?.estadoSunat);
-      } else if (filterSunatValidadas === 'anuladas_baja') {
-        matchesSunat = f.estado === 'anulada' || f.detalles?.estadoSunat === 'BAJA_COMUNICADA';
-      } else if (filterSunatValidadas === 'control_interno') {
-        matchesSunat = f.detalles?.modoTributario === 'interno_sin_ruc';
+      // 1. Filtro Año y Mes (extracción rápida desde ISO string)
+      if (!isYearAll || !isMonthAll) {
+        let fYear = defaultYear;
+        let fMonth = defaultMonth;
+        if (f.created_at && typeof f.created_at === 'string' && f.created_at.length >= 7) {
+          fYear = f.created_at.substring(0, 4);
+          const m = parseInt(f.created_at.substring(5, 7), 10);
+          fMonth = !isNaN(m) ? String(m) : defaultMonth;
+        } else if (f.created_at) {
+          const fDate = new Date(f.created_at);
+          if (!isNaN(fDate.getTime())) {
+            fYear = String(fDate.getFullYear());
+            fMonth = String(fDate.getMonth() + 1);
+          }
+        }
+        if (!isYearAll && fYear !== filterYear) return false;
+        if (!isMonthAll && fMonth !== filterMonth) return false;
       }
 
-      return matchesYear && matchesMonth && matchesSearch && matchesTipo && matchesEstado && matchesSunat;
-    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      // 2. Filtro Tipo
+      if (!isTipoAll && f.tipo !== filterTipo) return false;
+
+      // 3. Filtro Estado
+      if (!isEstadoAll && f.estado !== filterEstado) return false;
+
+      // 4. Filtro SUNAT
+      if (!isSunatAll) {
+        const modo = f.detalles?.modoTributario;
+        const estSunat = f.detalles?.estadoSunat;
+        if (filterSunatValidadas === 'validadas_sunat') {
+          if (f.estado === 'anulada' || modo === 'interno_sin_ruc' || (estSunat && estSunat !== 'ACEPTADO')) {
+            return false;
+          }
+        } else if (filterSunatValidadas === 'anuladas_baja') {
+          if (f.estado !== 'anulada' && estSunat !== 'BAJA_COMUNICADA') return false;
+        } else if (filterSunatValidadas === 'control_interno') {
+          if (modo !== 'interno_sin_ruc') return false;
+        }
+      }
+
+      // 5. Búsqueda de texto (flexible para Serie-Correlativo, DNI, RUC, Nombre o Concepto)
+      if (hasSearch) {
+        const idMatch = f.id ? String(f.id).toLowerCase().includes(searchLower) : false;
+        
+        // Búsqueda inteligente por Serie y Correlativo:
+        // Soporta: 'B001-000001', 'B001 000001', 'B001000001', 'B001-1', 'B001', '000001', etc.
+        const effectiveSerie = f.detalles?.serieCorrelativo || 
+          (f.tipo === 'estudiante' 
+            ? `B001-${String(f.id || '').replace(/\D/g, '').slice(0, 6).padStart(6, '0')}` 
+            : `E001-${String(f.id || '').replace(/\D/g, '').slice(0, 6).padStart(6, '0')}`);
+        
+        const effLower = effectiveSerie.toLowerCase();
+        const effClean = effLower.replace(/[-\s]/g, '');
+        const searchClean = searchLower.replace(/[-\s]/g, '');
+
+        let serieMatch = effLower.includes(searchLower) || (searchClean.length >= 3 && effClean.includes(searchClean));
+
+        // Si el usuario busca "B001-1", "B001 1" o similar sin los ceros de relleno
+        if (!serieMatch && (searchLower.includes('-') || searchLower.includes(' '))) {
+          const parts = searchLower.split(/[-\s]+/);
+          if (parts.length === 2 && parts[0] && parts[1] && !isNaN(Number(parts[1]))) {
+            const padded = `${parts[0].trim()}-${parts[1].trim().padStart(6, '0')}`;
+            if (effLower.includes(padded)) {
+              serieMatch = true;
+            }
+          }
+        }
+
+        const conceptoMatch = f.concepto ? String(f.concepto).toLowerCase().includes(searchLower) : false;
+        const personaMatch = f.detalles?.nombrePersona ? String(f.detalles.nombrePersona).toLowerCase().includes(searchLower) : false;
+        const dniDocMatch = f.detalles?.dniDocente ? String(f.detalles.dniDocente).toLowerCase().includes(searchLower) : false;
+        const dniEstMatch = f.detalles?.dniEstudiante ? String(f.detalles.dniEstudiante).toLowerCase().includes(searchLower) : false;
+        const rucMatch = f.detalles?.docClienteNumero ? String(f.detalles.docClienteNumero).toLowerCase().includes(searchLower) : false;
+
+        if (!idMatch && !serieMatch && !conceptoMatch && !personaMatch && !dniDocMatch && !dniEstMatch && !rucMatch) {
+          return false;
+        }
+      }
+
+      return true;
+    }).sort((a, b) => {
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      return timeB - timeA;
+    });
   }, [facturas, filterYear, filterMonth, searchTerm, filterTipo, filterEstado, filterSunatValidadas]);
 
   // Lista de todas las facturas validadas por la SUNAT (emitidas y externas) usando src/lib/sunat.ts
@@ -1580,14 +1687,8 @@ export const BovedaFacturasView: React.FC = () => {
       </div>
 
       {/* PANEL DE APROBACIÓN DE ASISTENCIAS REGISTRADAS POR PROFESORES (Genera Factura en Sistema + Factura Personal del Profesor) */}
-      <AnimatePresence>
-        {showApproveAttendancePanel && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            className="bg-white dark:bg-slate-900/60 border border-emerald-200/80 dark:border-emerald-500/20 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4"
-          >
+      {showApproveAttendancePanel && (
+        <div className="bg-white dark:bg-slate-900/60 border border-emerald-200/80 dark:border-emerald-500/20 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-gray-100 dark:border-white/10 pb-3.5">
               <div className="flex items-start sm:items-center gap-3">
                 <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
@@ -1829,9 +1930,8 @@ export const BovedaFacturasView: React.FC = () => {
                 </table>
               </div>
             )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
 
       {/* Filters and Search toolbar (con filtro por Año y Mes - por defecto este mes - y Exportación PDF) */}
       <div className="bg-white dark:bg-slate-900/40 p-4 rounded-2xl border border-gray-150 dark:border-white/10 shadow-sm flex flex-col gap-3">
@@ -2013,7 +2113,7 @@ export const BovedaFacturasView: React.FC = () => {
 
                       <td className="py-3.5 px-4">
                         <div className="font-bold text-slate-800 dark:text-slate-200">
-                          {factura.detalles.nombrePersona}
+                          {factura.detalles?.nombrePersona || 'Receptor General'}
                         </div>
                         <div className="text-[10px] font-mono text-gray-500 dark:text-zinc-400">
                           {docNum.length === 11 ? 'RUC' : 'DNI'}: {docNum} · {factura.detalles?.condicionContribuyente || 'HABIDO'}
@@ -2328,25 +2428,16 @@ export const BovedaFacturasView: React.FC = () => {
       {/* =====================================================================
           MODAL 1: EMISIÓN DE COMPROBANTE ELECTRÓNICO SUNAT (MATRÍCULA / DOCENTE)
          ===================================================================== */}
-      <AnimatePresence>
-        {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
-              onClick={() => {
-                if (!isUploading) setIsModalOpen(false);
-              }}
-            />
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-950/70"
+            onClick={() => {
+              if (!isUploading) setIsModalOpen(false);
+            }}
+          />
 
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 15 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-gray-150 dark:border-white/10 rounded-2xl shadow-2xl p-6 overflow-hidden max-h-[92vh] flex flex-col"
-            >
+          <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-gray-150 dark:border-white/10 rounded-2xl shadow-2xl p-6 overflow-hidden max-h-[92vh] flex flex-col z-10">
               <div className="flex items-center justify-between border-b border-gray-150 dark:border-white/10 pb-3.5">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
@@ -2683,30 +2774,20 @@ export const BovedaFacturasView: React.FC = () => {
                   </>
                 )}
               </form>
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* =====================================================================
           MODAL 2: VALIDACIÓN DE COMPROBANTES Y CONSULTA DE FACTURAS VALIDADAS SUNAT
          ===================================================================== */}
-      <AnimatePresence>
-        {showValidadorCpeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowValidadorCpeModal(false)}
-              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-3xl p-6 relative z-10 shadow-2xl max-h-[90vh] flex flex-col space-y-4 overflow-hidden"
-            >
+      {showValidadorCpeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => setShowValidadorCpeModal(false)}
+            className="fixed inset-0 bg-slate-950/70"
+          />
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-3xl p-6 relative z-10 shadow-2xl max-h-[90vh] flex flex-col space-y-4 overflow-hidden">
               <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
@@ -3023,30 +3104,20 @@ export const BovedaFacturasView: React.FC = () => {
                   </div>
                 </div>
               )}
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* =====================================================================
           MODAL 3: EMISIÓN DE RESUMEN DIARIO DE BOLETAS (RC - SERVICIO #3A)
          ===================================================================== */}
-      <AnimatePresence>
-        {showResumenDiarioModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowResumenDiarioModal(false)}
-              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4"
-            >
+      {showResumenDiarioModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => setShowResumenDiarioModal(false)}
+            className="fixed inset-0 bg-slate-950/70"
+          />
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-5 h-5 text-emerald-600" />
@@ -3110,30 +3181,20 @@ export const BovedaFacturasView: React.FC = () => {
                   </div>
                 )}
               </div>
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* =====================================================================
           MODAL 4: COMUNICACIÓN DE BAJA FORMAL (RA - SERVICIO #3B)
          ===================================================================== */}
-      <AnimatePresence>
-        {facturaToBaja && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setFacturaToBaja(null)}
-              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4"
-            >
+      {facturaToBaja && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => setFacturaToBaja(null)}
+            className="fixed inset-0 bg-slate-950/70"
+          />
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-5 h-5 text-amber-500" />
@@ -3153,7 +3214,7 @@ export const BovedaFacturasView: React.FC = () => {
                     Comprobante: <span className="font-mono">{facturaToBaja.detalles?.serieCorrelativo || facturaToBaja.id}</span>
                   </p>
                   <p className="text-gray-500 dark:text-zinc-400">
-                    Receptor: {facturaToBaja.detalles.nombrePersona} · Monto: S/. {facturaToBaja.monto.toFixed(2)}
+                    Receptor: {facturaToBaja.detalles?.nombrePersona || 'Receptor'} · Monto: S/. {Number(facturaToBaja.monto || 0).toFixed(2)}
                   </p>
                 </div>
 
@@ -3187,30 +3248,20 @@ export const BovedaFacturasView: React.FC = () => {
                   </button>
                 </div>
               </form>
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* =====================================================================
           MODAL 5: GUÍAS DE REMISIÓN ELECTRÓNICA (GRE T001 - SERVICIO #4)
          ===================================================================== */}
-      <AnimatePresence>
-        {showGreModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowGreModal(false)}
-              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-2xl p-6 relative z-10 shadow-2xl max-h-[90vh] flex flex-col space-y-4 overflow-hidden"
-            >
+      {showGreModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => setShowGreModal(false)}
+            className="fixed inset-0 bg-slate-950/70"
+          />
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-2xl p-6 relative z-10 shadow-2xl max-h-[90vh] flex flex-col space-y-4 overflow-hidden">
               <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
                 <div className="flex items-center gap-2">
                   <Truck className="w-5 h-5 text-amber-500" />
@@ -3358,7 +3409,14 @@ export const BovedaFacturasView: React.FC = () => {
 
                   <div className="space-y-2">
                     {guiasRemision
-                      .filter(g => g.serieCorrelativo.toLowerCase().includes(greSearchQuery.toLowerCase()) || g.descripcionBienes.toLowerCase().includes(greSearchQuery.toLowerCase()))
+                      .filter(g => {
+                        const q = (greSearchQuery || '').toLowerCase().trim();
+                        if (!q) return true;
+                        return (
+                          (g.serieCorrelativo ? String(g.serieCorrelativo).toLowerCase() : '').includes(q) ||
+                          (g.descripcionBienes ? String(g.descripcionBienes).toLowerCase() : '').includes(q)
+                        );
+                      })
                       .map((gre) => (
                         <div key={gre.id} className="p-3 rounded-xl border border-gray-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                           <div>
@@ -3399,30 +3457,20 @@ export const BovedaFacturasView: React.FC = () => {
                   </div>
                 </div>
               </div>
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* =====================================================================
           MODAL 6: CONFIGURAR RUC / CREDENCIALES SOL SUNAT
          ===================================================================== */}
-      <AnimatePresence>
-        {showSunatConfigModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowSunatConfigModal(false)}
-              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4"
-            >
+      {showSunatConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => setShowSunatConfigModal(false)}
+            className="fixed inset-0 bg-slate-950/70"
+          />
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-3">
                 <div className="flex items-center gap-2">
                   <Settings2 className="w-5 h-5 text-indigo-600" />
@@ -3513,194 +3561,175 @@ export const BovedaFacturasView: React.FC = () => {
                   </button>
                 </div>
               </div>
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* PASSWORD CONFIRMATION MODAL FOR COPYING ACCESS CODE */}
-      <AnimatePresence>
-        {codeToCopy && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setCodeToCopy(null)}
-              className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-white/10 rounded-2xl w-full max-w-sm p-6 relative z-10 shadow-2xl space-y-4"
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-white/10">
-                <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-extrabold text-xs">
-                  <ShieldAlert className="w-4 h-4 text-amber-500" />
-                  <span>Verificación de Seguridad requerida</span>
-                </div>
+      {codeToCopy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => setCodeToCopy(null)}
+            className="fixed inset-0 bg-slate-950/70"
+          />
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-white/10 rounded-2xl w-full max-w-sm p-6 relative z-10 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-extrabold text-xs">
+                <ShieldAlert className="w-4 h-4 text-amber-500" />
+                <span>Verificación de Seguridad requerida</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCodeToCopy(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmCopyCode} className="space-y-3 pt-2">
+              <div>
+                <label className="block text-[10px] font-extrabold text-gray-500 uppercase tracking-wider mb-1">
+                  Ingresa la Contraseña de la Bóveda
+                </label>
+                <input
+                  autoFocus
+                  required
+                  type="password"
+                  placeholder="Escribe la contraseña..."
+                  value={copyPasswordInput}
+                  onChange={(e) => setCopyPasswordInput(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white rounded-xl outline-none"
+                />
+                {copyPasswordError && (
+                  <p className="text-[10px] text-rose-500 font-extrabold mt-1.5">{copyPasswordError}</p>
+                )}
+              </div>
+
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setCodeToCopy(null)}
-                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white cursor-pointer"
+                  className="flex-1 py-2 text-xs font-bold bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300 rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 text-xs font-extrabold bg-amber-500 hover:bg-amber-600 text-white rounded-xl shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Autorizar y Copiar
                 </button>
               </div>
-
-              <form onSubmit={handleConfirmCopyCode} className="space-y-3 pt-2">
-                <div>
-                  <label className="block text-[10px] font-extrabold text-gray-500 uppercase tracking-wider mb-1">
-                    Ingresa la Contraseña de la Bóveda
-                  </label>
-                  <input
-                    autoFocus
-                    required
-                    type="password"
-                    placeholder="Escribe la contraseña..."
-                    value={copyPasswordInput}
-                    onChange={(e) => setCopyPasswordInput(e.target.value)}
-                    className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white rounded-xl outline-none"
-                  />
-                  {copyPasswordError && (
-                    <p className="text-[10px] text-rose-500 font-extrabold mt-1.5">{copyPasswordError}</p>
-                  )}
-                </div>
-
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setCodeToCopy(null)}
-                    className="flex-1 py-2 text-xs font-bold bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300 rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-2 text-xs font-extrabold bg-amber-500 hover:bg-amber-600 text-white rounded-xl shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    Autorizar y Copiar
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* MODAL: CAMBIAR CLAVE DE BÓVEDA */}
-        {showChangePasscodeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowChangePasscodeModal(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white dark:bg-slate-900 border border-gray-150 dark:border-white/10 rounded-2xl w-full max-w-sm p-6 relative z-10 shadow-2xl space-y-4"
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-white/10">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400">
-                    <Key className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">Cambiar Clave de Bóveda</h3>
-                    <p className="text-[10px] text-gray-400">Se registrará en la base de datos de inmediato.</p>
-                  </div>
+      {/* MODAL: CAMBIAR CLAVE DE BÓVEDA */}
+      {showChangePasscodeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => setShowChangePasscodeModal(false)}
+            className="fixed inset-0 bg-black/60"
+          />
+          <div className="bg-white dark:bg-slate-900 border border-gray-150 dark:border-white/10 rounded-2xl w-full max-w-sm p-6 relative z-10 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400">
+                  <Key className="w-4 h-4" />
                 </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">Cambiar Clave de Bóveda</h3>
+                  <p className="text-[10px] text-gray-400">Se registrará en la base de datos de inmediato.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowChangePasscodeModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePasscode} className="space-y-3 pt-1">
+              <div>
+                <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                  Clave Actual de la Bóveda
+                </label>
+                <input
+                  required
+                  type="password"
+                  placeholder="Clave actual (por defecto 1234)"
+                  value={currentPassInput}
+                  onChange={(e) => setCurrentPassInput(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                  Nueva Clave de Seguridad
+                </label>
+                <input
+                  required
+                  type="password"
+                  placeholder="Mínimo 4 caracteres"
+                  value={newPassInput}
+                  onChange={(e) => setNewPassInput(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
+                  Confirmar Nueva Clave
+                </label>
+                <input
+                  required
+                  type="password"
+                  placeholder="Repita la nueva clave"
+                  value={confirmPassInput}
+                  onChange={(e) => setConfirmPassInput(e.target.value)}
+                  className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
+                />
+              </div>
+
+              {changePassError && (
+                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-bold text-center">
+                  {changePassError}
+                </div>
+              )}
+
+              {changePassSuccess && (
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold text-center">
+                  {changePassSuccess}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowChangePasscodeModal(false)}
-                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200"
+                  className="flex-1 py-2 text-xs font-bold bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300 rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPasscode}
+                  className="flex-1 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {isSavingPasscode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  Guardar Clave
                 </button>
               </div>
-
-              <form onSubmit={handleChangePasscode} className="space-y-3 pt-1">
-                <div>
-                  <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
-                    Clave Actual de la Bóveda
-                  </label>
-                  <input
-                    required
-                    type="password"
-                    placeholder="Clave actual (por defecto 1234)"
-                    value={currentPassInput}
-                    onChange={(e) => setCurrentPassInput(e.target.value)}
-                    className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
-                    Nueva Clave de Seguridad
-                  </label>
-                  <input
-                    required
-                    type="password"
-                    placeholder="Mínimo 4 caracteres"
-                    value={newPassInput}
-                    onChange={(e) => setNewPassInput(e.target.value)}
-                    className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-extrabold uppercase text-gray-400 dark:text-zinc-500 mb-1">
-                    Confirmar Nueva Clave
-                  </label>
-                  <input
-                    required
-                    type="password"
-                    placeholder="Repita la nueva clave"
-                    value={confirmPassInput}
-                    onChange={(e) => setConfirmPassInput(e.target.value)}
-                    className="w-full p-2.5 text-xs bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-white/10 rounded-xl outline-none font-mono"
-                  />
-                </div>
-
-                {changePassError && (
-                  <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-bold text-center">
-                    {changePassError}
-                  </div>
-                )}
-
-                {changePassSuccess && (
-                  <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold text-center">
-                    {changePassSuccess}
-                  </div>
-                )}
-
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowChangePasscodeModal(false)}
-                    className="flex-1 py-2 text-xs font-bold bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300 rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingPasscode}
-                    className="flex-1 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    {isSavingPasscode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                    Guardar Clave
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+            </form>
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 };

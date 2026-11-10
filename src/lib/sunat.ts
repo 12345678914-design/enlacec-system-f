@@ -747,24 +747,24 @@ export function obtenerFacturasValidadasSunat(
       return false;
     }
 
-    if (filtros.fechaDesde && item.fechaEmision < filtros.fechaDesde) {
+    if (filtros.fechaDesde && item.fechaEmision && item.fechaEmision < filtros.fechaDesde) {
       return false;
     }
 
-    if (filtros.fechaHasta && item.fechaEmision > filtros.fechaHasta) {
+    if (filtros.fechaHasta && item.fechaEmision && item.fechaEmision > filtros.fechaHasta) {
       return false;
     }
 
     if (filtros.busqueda && filtros.busqueda.trim() !== '') {
       const q = filtros.busqueda.toLowerCase().trim();
       const match =
-        item.serieCorrelativo.toLowerCase().includes(q) ||
-        item.rucEmisor.toLowerCase().includes(q) ||
-        item.razonSocialEmisor.toLowerCase().includes(q) ||
-        item.docReceptor.toLowerCase().includes(q) ||
-        item.nombreReceptor.toLowerCase().includes(q) ||
-        item.ticketSunat.toLowerCase().includes(q) ||
-        item.hashCpe.toLowerCase().includes(q);
+        (item.serieCorrelativo ? String(item.serieCorrelativo).toLowerCase() : '').includes(q) ||
+        (item.rucEmisor ? String(item.rucEmisor).toLowerCase() : '').includes(q) ||
+        (item.razonSocialEmisor ? String(item.razonSocialEmisor).toLowerCase() : '').includes(q) ||
+        (item.docReceptor ? String(item.docReceptor).toLowerCase() : '').includes(q) ||
+        (item.nombreReceptor ? String(item.nombreReceptor).toLowerCase() : '').includes(q) ||
+        (item.ticketSunat ? String(item.ticketSunat).toLowerCase() : '').includes(q) ||
+        (item.hashCpe ? String(item.hashCpe).toLowerCase() : '').includes(q);
       if (!match) return false;
     }
 

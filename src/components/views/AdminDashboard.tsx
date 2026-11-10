@@ -16,6 +16,7 @@ import { SuccessFeedback } from '../SuccessFeedback';
 import { TeslaAIChatView } from './TeslaAIChatView';
 import { NewsAnnouncementsView } from './NewsAnnouncementsView';
 import { BovedaFacturasView } from './BovedaFacturasView';
+import { ErrorBoundary } from '../ErrorBoundary';
 import { VercelEnvConfigCard } from '../VercelEnvConfigCard';
 import { SkeletonSummaryCard } from '../Skeleton';
 import { 
@@ -6977,10 +6978,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                   setIsSavingVaultCode(true);
                   try {
                     await setVaultPasscode(inputVaultCode.trim());
-                    setVaultCodeMsg('✅ Clave de Bóveda actualizada y guardada en base de datos.');
+                    setVaultCodeMsg('✅ Nuevo código registrado en la tabla codigo_acceso_boveda.');
                     addNotification({
                       title: '🔐 Seguridad de Bóveda',
-                      content: `Nueva clave registrada en la base de datos (${inputVaultCode.trim()}). La clave anterior ya no permitirá el ingreso.`,
+                      content: `Nuevo código registrado en codigo_acceso_boveda (${inputVaultCode.trim()}). La clave anterior ya no permitirá el ingreso.`,
                       type: 'success'
                     });
                     setTimeout(() => setVaultCodeMsg(''), 4000);
@@ -8035,7 +8036,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
       case 'finanzas':
         return renderFinanzasValue();
       case 'facturas':
-        return <BovedaFacturasView />;
+        return (
+          <ErrorBoundary fallbackTitle="Error al cargar la Bóveda de Facturas">
+            <BovedaFacturasView />
+          </ErrorBoundary>
+        );
       case 'avisos':
         return <NewsAnnouncementsView />;
       case 'configuracion':

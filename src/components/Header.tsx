@@ -215,23 +215,23 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileSidebar, activeTab
     const query = searchQuery.toLowerCase().trim();
     
     const filteredStudents = students.filter(s => 
-      s.id.toLowerCase().includes(query) || 
-      s.name.toLowerCase().includes(query) ||
-      s.email.toLowerCase().includes(query)
+      (s.id ? String(s.id).toLowerCase() : '').includes(query) || 
+      (s.name ? String(s.name).toLowerCase() : '').includes(query) ||
+      (s.email ? String(s.email).toLowerCase() : '').includes(query)
     );
     
     const filteredTeachers = teachers.filter(t => 
-      t.id.toLowerCase().includes(query) || 
-      t.name.toLowerCase().includes(query) ||
-      t.email.toLowerCase().includes(query) ||
-      t.subject.toLowerCase().includes(query)
+      (t.id ? String(t.id).toLowerCase() : '').includes(query) || 
+      (t.name ? String(t.name).toLowerCase() : '').includes(query) ||
+      (t.email ? String(t.email).toLowerCase() : '').includes(query) ||
+      (t.subject ? String(t.subject).toLowerCase() : '').includes(query)
     );
     
     const flatRes = getFlatResources();
     const filteredResources = flatRes.filter(r => 
-      r.id.toLowerCase().includes(query) || 
-      r.name.toLowerCase().includes(query) ||
-      r.category.toLowerCase().includes(query)
+      (r.id ? String(r.id).toLowerCase() : '').includes(query) || 
+      (r.name ? String(r.name).toLowerCase() : '').includes(query) ||
+      (r.category ? String(r.category).toLowerCase() : '').includes(query)
     );
     
     return {
@@ -588,9 +588,9 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileSidebar, activeTab
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2 mb-1">
                               <span className={`font-bold text-xs ${!n.read ? 'text-gray-900 dark:text-white' : 'text-gray-700 dark:text-zinc-300'}`}>{n.title}</span>
-                              <span className="text-[9px] text-gray-400 dark:text-zinc-500 font-mono shrink-0">{n.time || n.timestamp}</span>
+                              <span className="text-[9px] text-gray-400 dark:text-zinc-500 font-mono shrink-0">{n.timestamp || (n as any).time}</span>
                             </div>
-                            <p className="text-xs text-gray-500 dark:text-zinc-400 leading-normal pr-4">{n.desc || n.content}</p>
+                            <p className="text-xs text-gray-500 dark:text-zinc-400 leading-normal pr-4">{n.content || (n as any).desc}</p>
                           </div>
 
                           <button

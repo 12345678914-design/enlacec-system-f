@@ -2055,19 +2055,38 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
 
     const misFacturasFiltradas = misFacturasBase
       .filter(f => {
-        const d = f.created_at ? new Date(f.created_at) : new Date();
-        const yr = !isNaN(d.getTime()) ? String(d.getFullYear()) : String(currentY);
-        const mo = !isNaN(d.getTime()) ? String(d.getMonth() + 1) : String(new Date().getMonth() + 1);
+        if (!f) return false;
+        let yr = String(currentY);
+        let mo = String(new Date().getMonth() + 1);
+        if (f.created_at && typeof f.created_at === 'string' && f.created_at.length >= 7) {
+          yr = f.created_at.substring(0, 4);
+          const m = parseInt(f.created_at.substring(5, 7), 10);
+          mo = !isNaN(m) ? String(m) : mo;
+        }
 
         const matchesYear = docenteFacYear === 'todos' || yr === docenteFacYear;
         const matchesMonth = docenteFacMonth === 'todos' || mo === docenteFacMonth;
         const matchesEstado = docenteFacEstado === 'todos' || f.estado === docenteFacEstado;
-        const q = docenteFacSearch.toLowerCase().trim();
+        const q = (docenteFacSearch || '').toLowerCase().trim();
+        const sc = (f.detalles?.serieCorrelativo || f.id || '').toLowerCase();
+        const scClean = sc.replace(/[-\s]/g, '');
+        const qClean = q.replace(/[-\s]/g, '');
+
+        let matchesSerie = sc.includes(q) || (qClean.length >= 3 && scClean.includes(qClean));
+        if (!matchesSerie && (q.includes('-') || q.includes(' '))) {
+          const parts = q.split(/[-\s]+/);
+          if (parts.length === 2 && parts[0] && parts[1] && !isNaN(Number(parts[1]))) {
+            const padded = `${parts[0].trim()}-${parts[1].trim().padStart(6, '0')}`;
+            if (sc.includes(padded)) matchesSerie = true;
+          }
+        }
+
         const matchesSearch =
           !q ||
-          f.id.toLowerCase().includes(q) ||
-          (f.detalles?.serieCorrelativo || '').toLowerCase().includes(q) ||
-          f.concepto.toLowerCase().includes(q);
+          matchesSerie ||
+          (f.id ? String(f.id).toLowerCase() : '').includes(q) ||
+          (f.concepto ? String(f.concepto).toLowerCase() : '').includes(q) ||
+          (f.detalles?.nombrePersona ? String(f.detalles.nombrePersona).toLowerCase() : '').includes(q);
 
         return matchesYear && matchesMonth && matchesEstado && matchesSearch;
       })

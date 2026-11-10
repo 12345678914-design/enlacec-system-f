@@ -1151,23 +1151,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setVaultPasscodeState(code);
     localStorage.setItem('edu_vault_passcode', code);
     
-    // Persist to Supabase if config/app_settings table or usuarios table exists
+    // 1. Registrar nueva fila en la tabla 'codigo_acceso_boveda' de Supabase
     try {
-      console.log("🔒 [BOVEDA-SEGURIDAD] Sincronizando nueva clave de bóveda en Supabase...");
-      // Try updating system settings table or admin password/meta
+      console.log("🔒 [BOVEDA-SEGURIDAD] Enviando nuevo código a la tabla 'codigo_acceso_boveda' en Supabase...");
+      const { data: insertedData, error: bovedaErr } = await supabase
+        .from('codigo_acceso_boveda')
+        .insert([{ codigo: code }])
+        .select();
+
+      if (bovedaErr) {
+        console.warn("⚠️ [BOVEDA-SEGURIDAD] Error al insertar en codigo_acceso_boveda:", bovedaErr.message);
+      } else {
+        console.log("✅ [BOVEDA-SEGURIDAD] Fila creada exitosamente en 'codigo_acceso_boveda':", insertedData);
+      }
+    } catch (e) {
+      console.warn("⚠️ [BOVEDA-SEGURIDAD] Excepción al registrar en codigo_acceso_boveda:", e);
+    }
+
+    // 2. Persistir también en configuracion / app_settings como respaldo adicional
+    try {
       const { error: confErr } = await supabase.from('configuracion').upsert([
         { clave: 'vault_passcode', valor: code, updated_at: new Date().toISOString() }
       ], { onConflict: 'clave' });
 
       if (confErr) {
-        // Fallback: try app_settings
         await supabase.from('app_settings').upsert([
           { key: 'vault_passcode', value: code }
         ], { onConflict: 'key' });
       }
-      console.log("✅ [BOVEDA-SEGURIDAD] Clave de bóveda respaldada en Supabase.");
     } catch (e) {
-      console.warn("⚠️ [BOVEDA-SEGURIDAD] No se pudo escribir clave de bóveda en Supabase (usando respaldo seguro en navegador):", e);
+      // ignore fallback error
     }
   };
 
@@ -1905,18 +1918,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.log("ℹ️ [SISTEMA-LOG] Facturas cargadas de Almacenamiento Local (offline fallback). Registros:", loadedData.length);
     }
 
-    // Cargar clave de la bóveda de Supabase si existe
+    // Cargar clave más reciente de la bóveda desde la tabla 'codigo_acceso_boveda' de Supabase
     try {
-      const { data: configData } = await supabase.from('configuracion').select('valor').eq('clave', 'vault_passcode').maybeSingle();
-      if (configData && configData.valor) {
-        setVaultPasscodeState(configData.valor);
-        localStorage.setItem('edu_vault_passcode', configData.valor);
-        console.log("🔑 [BOVEDA-SEGURIDAD] Clave de bóveda cargada exitosamente desde Supabase.");
+      const { data: bovedaData } = await supabase
+        .from('codigo_acceso_boveda')
+        .select('codigo, created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (bovedaData && bovedaData.codigo) {
+        setVaultPasscodeState(bovedaData.codigo);
+        localStorage.setItem('edu_vault_passcode', bovedaData.codigo);
+        console.log("🔑 [BOVEDA-SEGURIDAD] Clave de bóveda cargada desde tabla 'codigo_acceso_boveda':", bovedaData.codigo);
       } else {
-        const { data: altConfig } = await supabase.from('app_settings').select('value').eq('key', 'vault_passcode').maybeSingle();
-        if (altConfig && altConfig.value) {
-          setVaultPasscodeState(altConfig.value);
-          localStorage.setItem('edu_vault_passcode', altConfig.value);
+        // Fallback a configuracion / app_settings si aún no hay filas en codigo_acceso_boveda
+        const { data: configData } = await supabase.from('configuracion').select('valor').eq('clave', 'vault_passcode').maybeSingle();
+        if (configData && configData.valor) {
+          setVaultPasscodeState(configData.valor);
+          localStorage.setItem('edu_vault_passcode', configData.valor);
+        } else {
+          const { data: altConfig } = await supabase.from('app_settings').select('value').eq('key', 'vault_passcode').maybeSingle();
+          if (altConfig && altConfig.value) {
+            setVaultPasscodeState(altConfig.value);
+            localStorage.setItem('edu_vault_passcode', altConfig.value);
+          }
         }
       }
     } catch (e) {
