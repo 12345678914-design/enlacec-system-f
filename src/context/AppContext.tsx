@@ -672,9 +672,72 @@ const INITIAL_ATTENDANCE: AttendanceRecord[] = [
 ];
 
 // --- MAPPER HELPERS FOR RESILIENT DATABASE CONFIGURATION ---
+const SURNAME_PARTICLES = new Set([
+  'DE', 'DEL', 'LA', 'LAS', 'LOS', 'SAN', 'SANTA', 'Y', 'VDA', 'VIUDA', 'VON', 'VAN', 'MC', 'MAC', 'DA', 'DI', 'DOS'
+]);
+
+export const splitFullNameParts = (
+  rawFullName?: string,
+  rawNombre?: string,
+  rawApellido?: string
+): { nombre: string; apellido: string } => {
+  const cleanNombre = (rawNombre || '').replace(/\s+/g, ' ').trim();
+  const cleanApellido = (rawApellido || '').replace(/\s+/g, ' ').trim();
+
+  if (cleanNombre && cleanApellido) {
+    // Auto-repair records where a second given name was previously pushed into apellido by split(' ')[0]
+    const nParts = cleanNombre.split(' ').filter(Boolean);
+    const aParts = cleanApellido.split(' ').filter(Boolean);
+    if (
+      nParts.length === 1 &&
+      aParts.length === 3 &&
+      !aParts.some(w => SURNAME_PARTICLES.has(w.toUpperCase()))
+    ) {
+      return {
+        nombre: `${nParts[0]} ${aParts[0]}`,
+        apellido: `${aParts[1]} ${aParts[2]}`
+      };
+    }
+    return { nombre: cleanNombre, apellido: cleanApellido };
+  }
+
+  if (cleanNombre && !cleanApellido) {
+    return { nombre: cleanNombre, apellido: '' };
+  }
+
+  const cleanedFull = (rawFullName || '')
+    .replace(/^(Prof\.|Dra\.|Dr\.|Lic\.|Mg\.|Ing\.)\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleanedFull) {
+    return { nombre: '', apellido: '' };
+  }
+
+  const words = cleanedFull.split(' ').filter(Boolean);
+  if (words.length >= 4) {
+    return {
+      nombre: words.slice(0, -2).join(' '),
+      apellido: words.slice(-2).join(' ')
+    };
+  }
+  if (words.length === 3) {
+    return {
+      nombre: words[0],
+      apellido: words.slice(1).join(' ')
+    };
+  }
+  if (words.length === 2) {
+    return {
+      nombre: words[0],
+      apellido: words[1]
+    };
+  }
+  return { nombre: words[0] || '', apellido: '' };
+};
+
 const mapStudentFromDb = (row: any): Student => {
-  const nombre = row.nombre || row.name?.split(' ')[0] || '';
-  const apellido = row.apellido || row.name?.split(' ').slice(1).join(' ') || '';
+  const { nombre, apellido } = splitFullNameParts(row.name, row.nombre, row.apellido);
   return {
     id: row.id,
     nombre,
@@ -687,8 +750,8 @@ const mapStudentFromDb = (row: any): Student => {
     created_at: row.created_at || new Date().toISOString(),
 
     // compatibility
-    name: row.name || `${nombre} ${apellido}`.trim(),
-    email: row.email || `${nombre.toLowerCase()}.${apellido.toLowerCase().replace(/\s+/g, '')}@sistema.edu`,
+    name: `${nombre} ${apellido}`.trim() || row.name || '',
+    email: row.email || `${nombre.toLowerCase().replace(/\s+/g, '')}.${apellido.toLowerCase().replace(/\s+/g, '')}@sistema.edu`,
     grade: row.grade || `${row.grado || 10}° Grado`,
     section: row.section || 'A',
     parentName: row.parent_name || row.parentName || `Apoderado de ${nombre}`,
@@ -703,47 +766,58 @@ const mapStudentFromDb = (row: any): Student => {
   };
 };
 
-const mapStudentToDb = (s: Student) => ({
-  id: s.id,
-  nombre: s.nombre || null,
-  apellido: s.apellido || null,
-  contacto: s.contacto ? Number(String(s.contacto).replace(/\D/g, '').slice(-9)) || null : null,
-  grado: s.grado ? Number(s.grado) : null,
-  nivel: s.nivel || null,
-  observacion: s.observacion || null,
-  estado: s.estado !== undefined ? !!s.estado : true,
-  created_at: s.created_at || new Date().toISOString(),
-  servicio_id: s.servicioId || null,
-  dni: s.dni ? String(s.dni).trim() : null,
-  name: s.name || `${s.nombre || ''} ${s.apellido || ''}`.trim(),
-  email: s.email || null,
-  grade: s.grade || (s.grado ? `${s.grado}° Grado` : null),
-  section: s.section || null,
-  parent_name: s.parentName || null,
-  parent_phone: s.parentPhone || null,
-  balance: s.balance !== undefined ? s.balance : 0,
-  attendance_rate: s.attendanceRate !== undefined ? s.attendanceRate : 95,
-  avatar_url: s.avatarUrl && s.avatarUrl.trim() !== '' ? s.avatarUrl : null,
-  status: s.estado !== false ? 'active' : 'inactive'
-});
+const mapStudentToDb = (s: Student) => {
+  const exactNombre = s.nombre ? s.nombre.trim() : splitFullNameParts(s.name).nombre;
+  const exactApellido = s.apellido !== undefined && s.apellido !== null && s.apellido.trim() !== ''
+    ? s.apellido.trim()
+    : (s.nombre ? '' : splitFullNameParts(s.name).apellido);
+  return {
+    id: s.id,
+    nombre: exactNombre || null,
+    apellido: exactApellido || null,
+    contacto: s.contacto ? Number(String(s.contacto).replace(/\D/g, '').slice(-9)) || null : null,
+    grado: s.grado ? Number(s.grado) : null,
+    nivel: s.nivel || null,
+    observacion: s.observacion || null,
+    estado: s.estado !== undefined ? !!s.estado : true,
+    created_at: s.created_at || new Date().toISOString(),
+    servicio_id: s.servicioId || null,
+    dni: s.dni ? String(s.dni).trim() : null,
+    name: `${exactNombre} ${exactApellido}`.trim() || s.name || '',
+    email: s.email || null,
+    grade: s.grade || (s.grado ? `${s.grado}° Grado` : null),
+    section: s.section || null,
+    parent_name: s.parentName || null,
+    parent_phone: s.parentPhone || null,
+    balance: s.balance !== undefined ? s.balance : 0,
+    attendance_rate: s.attendanceRate !== undefined ? s.attendanceRate : 95,
+    avatar_url: s.avatarUrl && s.avatarUrl.trim() !== '' ? s.avatarUrl : null,
+    status: s.estado !== false ? 'active' : 'inactive'
+  };
+};
 
-const mapStudentToEstudiantesDb = (s: Student) => ({
-  id: s.id,
-  created_at: s.created_at || new Date().toISOString(),
-  nombre: s.nombre || s.name?.split(' ')[0] || '',
-  apellido: s.apellido || s.name?.split(' ').slice(1).join(' ') || '',
-  contacto: s.contacto ? Number(String(s.contacto).replace(/\D/g, '').slice(-9)) || null : null,
-  grado: s.grado ? Number(s.grado) : null,
-  nivel: s.nivel || null,
-  observacion: s.observacion || null,
-  estado: s.estado !== undefined ? !!s.estado : true,
-  avatar_url: s.avatarUrl && s.avatarUrl.trim() !== '' ? s.avatarUrl : null,
-  dni: s.dni ? String(s.dni).trim() : null
-});
+const mapStudentToEstudiantesDb = (s: Student) => {
+  const exactNombre = s.nombre ? s.nombre.trim() : splitFullNameParts(s.name).nombre;
+  const exactApellido = s.apellido !== undefined && s.apellido !== null && s.apellido.trim() !== ''
+    ? s.apellido.trim()
+    : (s.nombre ? '' : splitFullNameParts(s.name).apellido);
+  return {
+    id: s.id,
+    created_at: s.created_at || new Date().toISOString(),
+    nombre: exactNombre,
+    apellido: exactApellido,
+    contacto: s.contacto ? Number(String(s.contacto).replace(/\D/g, '').slice(-9)) || null : null,
+    grado: s.grado ? Number(s.grado) : null,
+    nivel: s.nivel || null,
+    observacion: s.observacion || null,
+    estado: s.estado !== undefined ? !!s.estado : true,
+    avatar_url: s.avatarUrl && s.avatarUrl.trim() !== '' ? s.avatarUrl : null,
+    dni: s.dni ? String(s.dni).trim() : null
+  };
+};
 
 const mapTeacherFromDb = (row: any): Teacher => {
-  const nombre = row.nombre || row.name?.replace('Prof. ', '')?.replace('Dra. ', '')?.replace('Lic. ', '')?.split(' ')[0] || '';
-  const apellido = row.apellido || row.name?.replace('Prof. ', '')?.replace('Dra. ', '')?.replace('Lic. ', '')?.split(' ').slice(1).join(' ') || '';
+  const { nombre, apellido } = splitFullNameParts(row.name, row.nombre, row.apellido);
   const telefono = Number(row.telefono || row.phone?.replace(/\D/g, '')?.slice(-9) || 954123456);
   
   // Extraer el año de manera segura por si viene como string de fecha (ej. "2028-12-31")
@@ -2302,9 +2376,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addStudent = async (studentData: Omit<Student, 'id'>) => {
     const newId = generateUUID();
     const originalAvatar = studentData.avatarUrl;
+    const exactNombre = (studentData.nombre || '').replace(/\s+/g, ' ').trim();
+    const exactApellido = (studentData.apellido || '').replace(/\s+/g, ' ').trim();
 
     const newStudent: Student = {
       ...studentData,
+      nombre: exactNombre,
+      apellido: exactApellido,
+      name: `${exactNombre} ${exactApellido}`.trim() || studentData.name || '',
       contacto: studentData.contacto ? Number(String(studentData.contacto).replace(/\D/g, '').slice(-9)) || 987654321 : 987654321,
       id: newId,
       created_at: new Date().toISOString()
@@ -3853,70 +3932,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       console.log(`🌐 [BOVEDA-SISTEMA] Intentando persistir Factura ${newFactura.id} en base de datos remota Supabase (tabla 'facturas')...`);
       
-      // FLUX: Primero registra al estudiante, luego su relación con servicio y luego guarda la factura
+      // FLUX: Verifica si el estudiante ya fue creado por addStudent antes de intentar un fallback
       if (newFactura.tipo === 'estudiante' && newFactura.student_id) {
         let studentObj = students.find(s => s.id === newFactura.student_id);
-        if (!studentObj && newFactura.detalles) {
-          const rawContactStr = String((newFactura.detalles as any)?.contactoEstudiante || '987654321').replace(/\D/g, '').slice(-9);
-          studentObj = {
-            id: newFactura.student_id,
-            nombre: newFactura.detalles.nombrePersona?.split(' ')[0] || 'Estudiante',
-            apellido: newFactura.detalles.nombrePersona?.split(' ').slice(1).join(' ') || '',
-            dni: newFactura.detalles.dniEstudiante || '',
-            contacto: Number(rawContactStr) || 987654321,
-            grado: 1,
-            nivel: 'Primaria',
-            estado: true
-          };
-        }
-        
+
         try {
-          if (studentObj) {
-            await supabase.from('estudiantes').upsert([mapStudentToEstudiantesDb(studentObj)], { onConflict: 'id' });
-            await supabase.from('students').upsert([mapStudentToDb(studentObj)], { onConflict: 'id' });
-            console.log(`✅ [BOVEDA-SISTEMA] Estudiante ${studentObj.id} registrado/verificado en tablas 'estudiantes' and 'students'.`);
-            
-            if (studentObj.servicioId) {
-              try {
-                const { error: seErr } = await supabase.from('servicio_estudiante').upsert([{
-                  id_servicio: studentObj.servicioId,
-                  id_estudiante: studentObj.id
-                }], { onConflict: 'id_estudiante,id_servicio' });
-                if (seErr) {
-                  await supabase.from('servicio_estudiante').insert([{
-                    id_servicio: studentObj.servicioId,
-                    id_estudiante: studentObj.id
-                  }]);
-                }
-                console.log(`✅ [BOVEDA-SISTEMA] Relación servicio-estudiante registrada en 'servicio_estudiante'.`);
-              } catch (relErr) {
-                console.warn("⚠️ No se pudo registrar relación servicio_estudiante:", relErr);
-              }
+          // Consultar primero si el estudiante ya existe en Supabase (ej. recién creado por addStudent)
+          const { data: existingInDb } = await supabase
+            .from('estudiantes')
+            .select('id, nombre, apellido')
+            .eq('id', newFactura.student_id)
+            .maybeSingle();
+
+          if (!existingInDb) {
+            if (!studentObj && newFactura.detalles) {
+              const rawContactStr = String(newFactura.detalles.contactoEstudiante || '987654321').replace(/\D/g, '').slice(-9);
+              const parsedParts = splitFullNameParts(
+                newFactura.detalles.nombrePersona,
+                newFactura.detalles.nombreEstudiante,
+                newFactura.detalles.apellidoEstudiante
+              );
+              studentObj = {
+                id: newFactura.student_id,
+                nombre: parsedParts.nombre || 'Estudiante',
+                apellido: parsedParts.apellido || '',
+                dni: newFactura.detalles.dniEstudiante || '',
+                contacto: Number(rawContactStr) || 987654321,
+                grado: 1,
+                nivel: 'Primaria',
+                estado: true
+              };
+            }
+
+            if (studentObj) {
+              await supabase.from('estudiantes').upsert([mapStudentToEstudiantesDb(studentObj)], { onConflict: 'id' });
+              await supabase.from('students').upsert([mapStudentToDb(studentObj)], { onConflict: 'id' });
+              console.log(`✅ [BOVEDA-SISTEMA] Estudiante ${studentObj.id} registrado en tablas 'estudiantes' y 'students'.`);
             }
           } else {
-            const rawContactStr = String((newFactura.detalles as any)?.contactoEstudiante || '987654321').replace(/\D/g, '').slice(-9);
-            await supabase.from('estudiantes').upsert([{
-              id: newFactura.student_id,
-              nombre: newFactura.detalles?.nombrePersona || 'Estudiante',
-              apellido: '',
-              contacto: Number(rawContactStr) || 987654321,
-              grado: 1,
-              nivel: 'Primaria',
-              dni: (newFactura.detalles as any)?.dniEstudiante || null,
-              estado: true
-            }], { onConflict: 'id' });
-            await supabase.from('students').upsert([{
-              id: newFactura.student_id,
-              name: newFactura.detalles?.nombrePersona || 'Estudiante',
-              grade: '1',
-              section: 'A',
-              dni: (newFactura.detalles as any)?.dniEstudiante || null,
-              contacto: Number(rawContactStr) || 987654321,
-              status: 'active'
-            }], { onConflict: 'id' });
+            console.log(`✅ [BOVEDA-SISTEMA] Estudiante ${newFactura.student_id} (${existingInDb.nombre} | ${existingInDb.apellido}) ya existe en 'estudiantes', se conserva su nombre y apellido exactos del formulario.`);
+          }
+
+          if (studentObj?.servicioId) {
+            try {
+              const { error: seErr } = await supabase.from('servicio_estudiante').upsert([{
+                id_servicio: studentObj.servicioId,
+                id_estudiante: studentObj.id
+              }], { onConflict: 'id_estudiante,id_servicio' });
+              if (seErr) {
+                await supabase.from('servicio_estudiante').insert([{
+                  id_servicio: studentObj.servicioId,
+                  id_estudiante: studentObj.id
+                }]);
+              }
+            } catch (relErr) {
+              console.warn("⚠️ No se pudo registrar relación servicio_estudiante:", relErr);
+            }
           }
         } catch (stErr) {
-          console.warn("⚠️ No se pudo registrar estudiante/servicio in Supabase previamente a factura:", stErr);
+          console.warn("⚠️ No se pudo verificar estudiante/servicio en Supabase previamente a factura:", stErr);
         }
       }
 

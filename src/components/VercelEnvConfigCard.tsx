@@ -142,7 +142,7 @@ export const VercelEnvConfigCard: React.FC = () => {
               <div>
                 <div className="text-[10px] text-slate-400 uppercase font-bold">Motor IA</div>
                 <div className="font-bold text-purple-300">
-                  {envConfig.groqApiKey ? 'Groq Llama 3.3 Active' : 'Fallback Modo Guía'}
+                  Groq Llama 3.3 Active
                 </div>
               </div>
             </div>

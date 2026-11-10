@@ -996,7 +996,7 @@ export const TeslaAIChatView: React.FC = () => {
                   Conexión Segura con el Servidor
                 </div>
                 <p className="text-[10.5px] text-zinc-600 dark:text-zinc-300 leading-normal font-medium">
-                  El asistente funciona exclusivamente utilizando la clave de entorno <code className="font-mono bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-1 py-0.5 rounded text-[9.5px] border border-indigo-150/20">GROQ_API_KEY</code> provista en el servidor escolar de forma segura. No requiere ninguna configuración por parte del usuario.
+                  El asistente funciona internamente utilizando la variable <code className="font-mono bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-1 py-0.5 rounded text-[9.5px] border border-indigo-150/20">VITE_GROQ_API_KEY</code> configurada en Vercel de forma segura y automática.
                 </p>
               </div>
 

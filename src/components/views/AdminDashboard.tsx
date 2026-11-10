@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { useApp } from '../../context/AppContext';
+import { useApp, splitFullNameParts } from '../../context/AppContext';
 import { supabase } from '../../lib/supabaseClient';
 import { AttendanceCalendar } from '../AttendanceCalendar';
 import { AIBoardSandbox } from '../AIBoardSandbox';
@@ -223,7 +223,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
     }
   }, [showAddStudentModal]);
   const [enrollmentProcessStep, setEnrollmentProcessStep] = useState<'idle' | 'invoice' | 'saving' | 'success'>('idle');
-  const [enrollmentInvoiceData, setEnrollmentInvoiceData] = useState<{ studentName: string; concept: string; amount: number; dni: string } | null>(null);
+  const [enrollmentInvoiceData, setEnrollmentInvoiceData] = useState<{ studentName: string; nombre?: string; apellido?: string; concept: string; amount: number; dni: string } | null>(null);
   const [studentDragActive, setStudentDragActive] = useState(false);
   const [imageToCrop, setImageToCrop] = useState<{ src: string; target: 'newStudent' | 'editStudent' | 'newTeacher' | 'editTeacher' } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; type: 'student' | 'teacher' | 'resource'; name: string; extraAction?: () => void } | null>(null);
@@ -329,10 +329,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
             const { data: dbEst } = await supabase.from('estudiantes').select('*').eq('dni', cleanDni);
             if (dbEst && dbEst.length > 0) {
               const item = dbEst[0];
+              const parsedDb = splitFullNameParts(item.name, item.nombre, item.apellido);
               existingStudent = {
                 id: item.id,
-                nombre: item.nombre || '',
-                apellido: item.apellido || '',
+                nombre: parsedDb.nombre,
+                apellido: parsedDb.apellido,
                 contacto: item.contacto || item.telefono || 987654321,
                 grado: item.grado || 1,
                 nivel: item.nivel || 'Primaria',
@@ -341,7 +342,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                 dni: cleanDni,
                 foto_url: item.foto_url || item.avatar_url || '',
                 servicioId: item.servicio_id || item.servicioId || '',
-                name: `${item.nombre || ''} ${item.apellido || ''}`.trim(),
+                name: `${parsedDb.nombre} ${parsedDb.apellido}`.trim(),
                 email: '',
                 grade: `${item.grado || 1}° Grado`,
                 section: 'A',
@@ -362,11 +363,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
         if (existingStudent && matriculaMode === 'existente') {
           // Found existing student in Supabase/local state -> Auto-fill and ask for service
           console.log("✅ Estudiante existente identificado en Supabase:", existingStudent);
-          setExistingStudentData(existingStudent);
+          const parsedExisting = splitFullNameParts(existingStudent.name, existingStudent.nombre, existingStudent.apellido);
+          setExistingStudentData({
+            ...existingStudent,
+            nombre: parsedExisting.nombre,
+            apellido: parsedExisting.apellido
+          });
           setIsReniecAutofilled(true);
           setNewStudentData({
-            nombre: existingStudent.nombre || existingStudent.name?.split(' ')[0] || '',
-            apellido: existingStudent.apellido || existingStudent.name?.split(' ').slice(1).join(' ') || '',
+            nombre: parsedExisting.nombre,
+            apellido: parsedExisting.apellido,
             contacto: Number(existingStudent.contacto) || 987654321,
             grado: Number(existingStudent.grado) || 1,
             nivel: existingStudent.nivel || 'Primaria',
@@ -798,12 +804,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
       alert("Es obligatorio seleccionar un Servicio Académico para completar la matrícula.");
       return;
     }
-    const studentName = `${newStudentData.nombre} ${newStudentData.apellido}`.trim();
+    const cleanNombre = (newStudentData.nombre || '').replace(/\s+/g, ' ').trim();
+    const cleanApellido = (newStudentData.apellido || '').replace(/\s+/g, ' ').trim();
+    const studentName = `${cleanNombre} ${cleanApellido}`.replace(/\s+/g, ' ').trim();
     const matchedService = servicios.find(s => s.id === newStudentData.servicioId);
     const amount = matchedService?.pago !== undefined ? Number(matchedService.pago) : 150.00;
     
     setEnrollmentInvoiceData({
       studentName,
+      nombre: cleanNombre,
+      apellido: cleanApellido,
       concept: existingStudentData
         ? `Matrícula a Nuevo Servicio (${matchedService?.nombre || 'Servicio Académico'}) - ${studentName}`
         : `Boleta de Matrícula Regular - ${studentName}`,
@@ -823,15 +833,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
     setEnrollmentProcessStep('saving');
     
     try {
-      const studentName = enrollmentInvoiceData.studentName;
+      const exactNombre = (enrollmentInvoiceData.nombre || newStudentData.nombre || '').replace(/\s+/g, ' ').trim();
+      const exactApellido = (enrollmentInvoiceData.apellido || newStudentData.apellido || '').replace(/\s+/g, ' ').trim();
+      const studentName = `${exactNombre} ${exactApellido}`.trim() || enrollmentInvoiceData.studentName;
       let targetStudent: Student;
 
       if (existingStudentData) {
         console.log("📁 [MATRICULA-FRONTEND] Re-matriculando estudiante existente:", existingStudentData.id);
         targetStudent = {
           ...existingStudentData,
-          nombre: newStudentData.nombre || existingStudentData.nombre,
-          apellido: newStudentData.apellido || existingStudentData.apellido,
+          nombre: exactNombre || existingStudentData.nombre,
+          apellido: exactApellido || existingStudentData.apellido,
+          name: `${exactNombre || existingStudentData.nombre} ${exactApellido || existingStudentData.apellido}`.trim(),
           contacto: Number(newStudentData.contacto) || existingStudentData.contacto,
           grado: Number(newStudentData.grado) || existingStudentData.grado,
           nivel: newStudentData.nivel || existingStudentData.nivel,
@@ -853,10 +866,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
       } else {
         console.log("📁 [MATRICULA-FRONTEND] Paso 1: Creando ficha del estudiante en el almacén de datos...");
         
-        // 1. Guardar en el almacén de estudiantes primero
+        // 1. Guardar en el almacén de estudiantes primero (conservando nombre completo con segundo nombre y apellido exactos)
         targetStudent = await addStudent({
-          nombre: newStudentData.nombre,
-          apellido: newStudentData.apellido,
+          nombre: exactNombre,
+          apellido: exactApellido,
           contacto: Number(newStudentData.contacto),
           grado: Number(newStudentData.grado),
           nivel: newStudentData.nivel,
@@ -866,10 +879,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
           dni: newStudentData.dni || '',
           
           name: studentName,
-          email: `${newStudentData.nombre.toLowerCase().replace(/\s+/g, '')}.${newStudentData.apellido.toLowerCase().replace(/\s+/g, '')}@sistema.edu`,
+          email: `${exactNombre.toLowerCase().replace(/\s+/g, '')}.${exactApellido.toLowerCase().replace(/\s+/g, '')}@sistema.edu`,
           grade: `${newStudentData.grado}° Grado`,
           section: 'A',
-          parentName: `Apoderado de ${newStudentData.nombre}`,
+          parentName: `Apoderado de ${exactNombre}`,
           parentPhone: `+51 ${newStudentData.contacto}`,
           balance: 0,
           grades: [
@@ -921,6 +934,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
           pdf_url: pdfUrl || pdfResult.base64,
           detalles: {
             nombrePersona: studentName,
+            nombreEstudiante: targetStudent.nombre,
+            apellidoEstudiante: targetStudent.apellido,
+            contactoEstudiante: targetStudent.contacto,
             dniEstudiante: targetStudent.dni || 'No registrado',
             nombreServicio: matchedService?.nombre || 'Matrícula Regular',
             cursosVinculados: linkedCourses.map(c => c.nombre),
@@ -965,9 +981,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
     } else {
       if (initialGrado < 1 || initialGrado > 6) initialGrado = 1;
     }
+    const parsedStudent = splitFullNameParts(student.name, student.nombre, student.apellido);
     setEditStudentData({
-      nombre: student.nombre || student.name?.split(' ')[0] || '',
-      apellido: student.apellido || student.name?.split(' ').slice(1).join(' ') || '',
+      nombre: parsedStudent.nombre,
+      apellido: parsedStudent.apellido,
       contacto: student.contacto || 987654321,
       grado: initialGrado,
       nivel: initialNivel,
@@ -1048,9 +1065,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
 
   const startEditTeacher = (teacher: Teacher) => {
     setEditingTeacher(teacher);
+    const parsedTeacher = splitFullNameParts(teacher.name, teacher.nombre, teacher.apellido);
     setEditTeacherData({
-      nombre: teacher.nombre || teacher.name?.replace('Prof. ', '')?.replace('Dra. ', '')?.replace('Lic. ', '')?.split(' ')[0] || '',
-      apellido: teacher.apellido || teacher.name?.replace('Prof. ', '')?.replace('Dra. ', '')?.replace('Lic. ', '')?.split(' ').slice(1).join(' ') || '',
+      nombre: parsedTeacher.nombre,
+      apellido: parsedTeacher.apellido,
       edad: teacher.edad || 35,
       dni: teacher.dni || '',
       telefono: teacher.telefono || 954123456,

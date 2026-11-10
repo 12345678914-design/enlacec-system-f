@@ -211,6 +211,9 @@ export interface Factura {
     nombreServicio?: string;
     dniDocente?: string;
     dniEstudiante?: string;
+    nombreEstudiante?: string;
+    apellidoEstudiante?: string;
+    contactoEstudiante?: string | number;
     nombrePersona: string;
     clasesDictadas?: number;
     tarifaPorClase?: number;

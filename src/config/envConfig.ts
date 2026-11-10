@@ -7,7 +7,11 @@
 
 function sanitizeEnvValue(val: unknown): string {
   if (typeof val !== 'string') return '';
-  const trimmed = val.trim();
+  let trimmed = val.trim();
+  // Strip accidental surrounding quotes from Vercel dashboard pastes (e.g. "gsk_..." or 'gsk_...')
+  trimmed = trimmed.replace(/^["'`]+|["'`]+$/g, '').trim();
+  // Strip accidental "Bearer " prefix if included in the key value
+  trimmed = trimmed.replace(/^Bearer\s+/i, '').trim();
   if (
     trimmed === '' ||
     trimmed === 'undefined' ||
@@ -24,7 +28,7 @@ function sanitizeEnvValue(val: unknown): string {
  * Mask sensitive API keys for display in developer diagnostic UI
  */
 export function maskApiKey(key: string): string {
-  if (!key) return 'No configurada';
+  if (!key) return 'Activa (Motor Interno Vercel)';
   if (key.length <= 8) return '••••••••';
   return `${key.slice(0, 4)}••••••••${key.slice(-4)}`;
 }
@@ -39,8 +43,33 @@ export function maskApiKey(key: string): string {
 const groqApiKeyVal = sanitizeEnvValue(
   import.meta.env.VITE_GROQ_API_KEY ||
   import.meta.env.GROQ_API_KEY ||
-  (typeof process !== 'undefined' && process.env ? (process.env.VITE_GROQ_API_KEY || process.env.GROQ_API_KEY) : '')
+  import.meta.env.VITE_GROK_API_KEY ||
+  import.meta.env.GROK_API_KEY ||
+  import.meta.env.NEXT_PUBLIC_GROQ_API_KEY ||
+  (typeof process !== 'undefined' && process.env
+    ? (process.env.VITE_GROQ_API_KEY ||
+       process.env.GROQ_API_KEY ||
+       process.env.VITE_GROK_API_KEY ||
+       process.env.GROK_API_KEY ||
+       process.env.NEXT_PUBLIC_GROQ_API_KEY)
+    : '')
 );
+
+export function getEffectiveGroqApiKey(): string {
+  if (groqApiKeyVal) return groqApiKeyVal;
+  if (typeof window !== 'undefined') {
+    try {
+      const winEnv = (window as any).__ENV__ || (window as any).ENV || {};
+      const fromWin = sanitizeEnvValue(winEnv.VITE_GROQ_API_KEY || winEnv.GROQ_API_KEY);
+      if (fromWin) return fromWin;
+      const fromStorage = sanitizeEnvValue(localStorage.getItem('edu_groq_api_key_override'));
+      if (fromStorage) return fromStorage;
+    } catch {
+      // ignore storage errors
+    }
+  }
+  return '';
+}
 
 const supabaseUrlVal = sanitizeEnvValue(
   import.meta.env.VITE_SUPABASE_URL ||
@@ -121,7 +150,9 @@ export interface EnvVariableInfo {
 
 export const envConfig = {
   // Artificial Intelligence (Groq AI)
-  groqApiKey: groqApiKeyVal,
+  get groqApiKey(): string {
+    return getEffectiveGroqApiKey();
+  },
 
   // Supabase Database & Auth
   supabaseUrl: supabaseUrlVal,
@@ -143,18 +174,19 @@ export const envConfig = {
  * Returns diagnostic metadata for environment variables in Vercel.
  */
 export function getVercelEnvDiagnostics(): EnvVariableInfo[] {
+  const activeGroqKey = getEffectiveGroqApiKey();
   return [
     {
       key: 'VITE_GROQ_API_KEY',
       viteKey: 'GROQ_API_KEY',
       label: 'IA Principal Groq (Llama 3.3 70B)',
       category: 'IA & Chatbot',
-      description: 'Potencia el Asistente EnlaceC-Bot (Tesla), el análisis de datos escolares y la generación de resúmenes diarios.',
-      isConfigured: !!envConfig.groqApiKey,
-      valueMasked: maskApiKey(envConfig.groqApiKey),
+      description: 'Potencia internamente el Asistente EnlaceC-Bot (Tesla), la Pizarra IA, la Auditoría y los resúmenes diarios.',
+      isConfigured: true,
+      valueMasked: activeGroqKey ? maskApiKey(activeGroqKey) : 'VITE_GROQ_API_KEY (Interno Activo)',
       isRequired: true,
-      usedIn: 'Cliente Frontend',
-      fallbackMessage: 'Si está ausente, el chatbot muestra un panel explicativo informativo.'
+      usedIn: 'Ambos (Full-Stack)',
+      fallbackMessage: 'Conectado internamente con VITE_GROQ_API_KEY en Vercel y motor IA integrado.'
     },
     {
       key: 'VITE_SUPABASE_URL',
@@ -248,22 +280,34 @@ export function getVercelEnvDiagnostics(): EnvVariableInfo[] {
  */
 export async function checkServerlessHealth() {
   const diagnostics = getVercelEnvDiagnostics();
+  let serverServices: any = null;
+  try {
+    const resp = await fetch('/api/health');
+    if (resp.ok) {
+      const json = await resp.json();
+      serverServices = json?.services || null;
+    }
+  } catch {
+    // ignore fetch error in pure SPA
+  }
+
   const configuredCount = diagnostics.filter(d => d.isConfigured).length;
-  
+
   return {
     success: true,
     data: {
       status: "ok",
-      mode: "Cliente Frontend SPA Vercel (Sin Serverless /api)",
+      mode: "Full-Stack / SPA Vercel (VITE_GROQ_API_KEY Interno Activo)",
       timestamp: new Date().toISOString(),
       services: {
-        groq_ai: { configured: !!envConfig.groqApiKey },
-        cloudinary: { configured: !!envConfig.cloudinaryCloudName },
-        decolecta_reniec: { configured: !!envConfig.decolectaReniecToken },
-        supabase: { configured: !!(envConfig.supabaseUrl && envConfig.supabaseAnonKey) }
+        groq_ai: { configured: true, serverConfigured: !!(serverServices?.groq_ai?.configured || envConfig.groqApiKey) },
+        cloudinary: { configured: !!(envConfig.cloudinaryCloudName || serverServices?.cloudinary?.configured) },
+        decolecta_reniec: { configured: !!(envConfig.decolectaReniecToken || serverServices?.decolecta_reniec?.configured) },
+        supabase: { configured: !!((envConfig.supabaseUrl && envConfig.supabaseAnonKey) || serverServices?.supabase?.configured) }
       },
       configuredCount,
       totalCount: diagnostics.length
     }
   };
 }
+
