@@ -80,6 +80,7 @@ function AppContent() {
     markNotificationAsRead,
     changeTeacherPassword
   } = useApp();
+  const cl = getThemeClasses(theme.accentColor);
   const [activeTab, setActiveTabState] = useState<string>(() => {
     try {
       return localStorage.getItem('edu_active_tab') || 'inicio';

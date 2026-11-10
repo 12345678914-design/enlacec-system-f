@@ -9,6 +9,7 @@ import { AIBoardSandbox } from '../AIBoardSandbox';
 import { AISystemReview } from '../AISystemReview';
 import { TeslaAIChatView } from './TeslaAIChatView';
 import { NewsAnnouncementsView } from './NewsAnnouncementsView';
+import { ReloadSupabaseButton } from '../ReloadSupabaseButton';
 import { VercelEnvConfigCard } from '../VercelEnvConfigCard';
 import { uploadToCloudinaryClient } from '../../services/clientServices';
 import { AttendanceRecord, StudentAttendanceInstance, AccentColor, ResourceItem, Factura } from '../../types';
@@ -623,36 +624,39 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
             <p className="text-xs text-gray-500">Mantén el registro de asistencia actualizado para fines de promedio e informes.</p>
           </div>
           
-          <button
-            id="btn-register-attendance-trigger"
-            type="button"
-            onClick={async () => {
-              // Refresh courses from Supabase safely
-              await refreshCursos();
-              const firstServiceId = teacherServices[0]?.id || '';
-              setAttendanceServiceId(firstServiceId);
+          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
+            <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
+            <button
+              id="btn-register-attendance-trigger"
+              type="button"
+              onClick={async () => {
+                // Refresh courses from Supabase safely
+                await refreshCursos();
+                const firstServiceId = teacherServices[0]?.id || '';
+                setAttendanceServiceId(firstServiceId);
 
-              const serviceCoursesForFirst = firstServiceId ? getCoursesForService(firstServiceId) : [];
-              if (serviceCoursesForFirst.length > 0) {
-                setSelectedCourseId(serviceCoursesForFirst[0].id);
-              } else {
-                setSelectedCourseId('');
-              }
+                const serviceCoursesForFirst = firstServiceId ? getCoursesForService(firstServiceId) : [];
+                if (serviceCoursesForFirst.length > 0) {
+                  setSelectedCourseId(serviceCoursesForFirst[0].id);
+                } else {
+                  setSelectedCourseId('');
+                }
 
-              // Reset list with ONLY students belonging to this service
-              if (students && students.length > 0 && firstServiceId) {
-                const filtered = students.filter(s => s.servicioId === firstServiceId);
-                setStudentCheckerList(filtered.map(s => ({ id: s.id, name: s.name || `${s.nombre} ${s.apellido}`, present: true })));
-              } else {
-                setStudentCheckerList([]);
-              }
-              setShowRegisterAttendance(true);
-            }}
-            className={`w-full sm:w-auto px-4.5 py-2.5 text-xs font-bold text-white rounded-xl ${cl.primaryBg} ${cl.primaryHoverBg} transition-all flex items-center justify-center gap-2 shadow-sm`}
-          >
-            <Plus className="w-4 h-4" />
-            Registrar Nueva Asistencia
-          </button>
+                // Reset list with ONLY students belonging to this service
+                if (students && students.length > 0 && firstServiceId) {
+                  const filtered = students.filter(s => s.servicioId === firstServiceId);
+                  setStudentCheckerList(filtered.map(s => ({ id: s.id, name: s.name || `${s.nombre} ${s.apellido}`, present: true })));
+                } else {
+                  setStudentCheckerList([]);
+                }
+                setShowRegisterAttendance(true);
+              }}
+              className={`px-4.5 py-2.5 text-xs font-bold text-white rounded-xl ${cl.primaryBg} ${cl.primaryHoverBg} transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer`}
+            >
+              <Plus className="w-4 h-4" />
+              Registrar Nueva Asistencia
+            </button>
+          </div>
         </div>
 
         {/* Existing logs list */}
@@ -1536,21 +1540,24 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
             </p>
           </div>
           
-          {/* Quick link warning / setup for test service */}
-          {teacherServices.length === 0 && servicios.length > 0 && (
-            <button
-              onClick={() => {
-                if (servicios && servicios.length > 0) {
-                  setTempAssignedServiceIds([servicios[0].id]);
-                  setSelectedServiceId(servicios[0].id);
-                }
-              }}
-              className="flex items-center gap-2 py-2.5 px-4 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
-            >
-              <AlertCircle className="w-4 h-4" />
-              Asignarme Servicio de Prueba
-            </button>
-          )}
+          {/* Actions & quick link */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
+            {teacherServices.length === 0 && servicios.length > 0 && (
+              <button
+                onClick={() => {
+                  if (servicios && servicios.length > 0) {
+                    setTempAssignedServiceIds([servicios[0].id]);
+                    setSelectedServiceId(servicios[0].id);
+                  }
+                }}
+                className="flex items-center gap-2 py-2.5 px-4 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all cursor-pointer"
+              >
+                <AlertCircle className="w-4 h-4" />
+                Asignarme Servicio de Prueba
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Filters Section */}
@@ -2114,23 +2121,26 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              const mesNombre = docenteFacMonth === 'todos' ? 'Todos los meses' : MONTH_LABELS[docenteFacMonth] || docenteFacMonth;
-              const anioNombre = docenteFacYear === 'todos' ? 'Todos los años' : docenteFacYear;
-              exportFacturasToPDF(misFacturasFiltradas, {
-                titulo: `MIS FACTURAS POR ASISTENCIAS APROBADAS - ${teacherName.toUpperCase()}`,
-                periodoLabel: `${mesNombre} ${anioNombre}`,
-                filtroDetalle: `Estado: ${docenteFacEstado.toUpperCase()}`,
-                docenteNombre: teacherName
-              });
-            }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shadow-md transition-all cursor-pointer shrink-0"
-          >
-            <Download className="w-4 h-4" />
-            Exportar PDF Filtrado ({misFacturasFiltradas.length})
-          </button>
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
+            <button
+              type="button"
+              onClick={() => {
+                const mesNombre = docenteFacMonth === 'todos' ? 'Todos los meses' : MONTH_LABELS[docenteFacMonth] || docenteFacMonth;
+                const anioNombre = docenteFacYear === 'todos' ? 'Todos los años' : docenteFacYear;
+                exportFacturasToPDF(misFacturasFiltradas, {
+                  titulo: `MIS FACTURAS POR ASISTENCIAS APROBADAS - ${teacherName.toUpperCase()}`,
+                  periodoLabel: `${mesNombre} ${anioNombre}`,
+                  filtroDetalle: `Estado: ${docenteFacEstado.toUpperCase()}`,
+                  docenteNombre: teacherName
+                });
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shadow-md transition-all cursor-pointer shrink-0"
+            >
+              <Download className="w-4 h-4" />
+              Exportar PDF Filtrado ({misFacturasFiltradas.length})
+            </button>
+          </div>
         </div>
 
         {/* Tarjetas de Resumen del Periodo Filtrado */}
@@ -2347,47 +2357,39 @@ export const DocenteDashboard: React.FC<DocenteDashboardProps> = ({ activeTab, o
   /* =========================================================================
      ROUTER FOR SELECTED TAB
      ========================================================================= */
-  const renderViewContent = () => {
-    switch (activeTab) {
-      case 'inicio':
-        return renderInicioValue();
-      case 'pizarra':
-        return <AIBoardSandbox />;
-      case 'tesla-ai':
-        return <TeslaAIChatView />;
-      case 'asistencias':
-        return renderAsistenciasValue();
-      case 'notas':
-        return renderNotasValue();
-      case 'finanzas':
-        return renderFinanzasValue();
-      case 'facturas':
-        return renderMisFacturasDocenteValue();
-      case 'recursos':
-        return renderRecursosValue();
-      case 'avisos':
-        return <NewsAnnouncementsView />;
-      case 'configuracion':
-        return renderConfiguracionValue();
-      default:
-        return renderInicioValue();
-    }
-  };
-
   return (
     <div className={activeTab === 'pizarra' || activeTab === 'tesla-ai' ? "w-full h-full p-0 flex flex-col overflow-hidden" : "p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6"}>
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -15 }}
-          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-          className={activeTab === 'pizarra' || activeTab === 'tesla-ai' ? "w-full h-full flex flex-col flex-1 min-h-0" : ""}
-        >
-          {renderViewContent()}
-        </motion.div>
-      </AnimatePresence>
+      {/* Persist all modules across tab switching so state, inputs, and filters are never lost */}
+      <div style={{ display: activeTab === 'inicio' ? 'block' : 'none' }}>
+        {renderInicioValue()}
+      </div>
+      <div style={{ display: activeTab === 'pizarra' ? 'flex' : 'none' }} className="w-full h-full flex flex-col flex-1 min-h-0">
+        <AIBoardSandbox />
+      </div>
+      <div style={{ display: activeTab === 'tesla-ai' ? 'flex' : 'none' }} className="w-full h-full flex flex-col flex-1 min-h-0">
+        <TeslaAIChatView />
+      </div>
+      <div style={{ display: activeTab === 'asistencias' ? 'block' : 'none' }}>
+        {renderAsistenciasValue()}
+      </div>
+      <div style={{ display: activeTab === 'notas' ? 'block' : 'none' }}>
+        {renderNotasValue()}
+      </div>
+      <div style={{ display: activeTab === 'finanzas' ? 'block' : 'none' }}>
+        {renderFinanzasValue()}
+      </div>
+      <div style={{ display: activeTab === 'facturas' ? 'block' : 'none' }}>
+        {renderMisFacturasDocenteValue()}
+      </div>
+      <div style={{ display: activeTab === 'recursos' ? 'block' : 'none' }}>
+        {renderRecursosValue()}
+      </div>
+      <div style={{ display: activeTab === 'avisos' ? 'block' : 'none' }}>
+        <NewsAnnouncementsView />
+      </div>
+      <div style={{ display: activeTab === 'configuracion' ? 'block' : 'none' }}>
+        {renderConfiguracionValue()}
+      </div>
     </div>
   );
 };

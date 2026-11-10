@@ -85,7 +85,7 @@ interface AppContextType {
   addNews: (newsItem: Omit<SchoolNews, 'id' | 'date'>) => void;
   updateNews: (newsItem: SchoolNews) => Promise<void>;
   deleteNews: (id: string) => Promise<void>;
-  uploadNewsImage: (bucket: 'avisos' | 'noticias', fileName: string, fileOrDataUrl: File | string) => Promise<string | null>;
+  uploadNewsImage: (bucket: 'avisos' | 'noticias' | string, fileName: string, fileOrDataUrl: File | string) => Promise<string | null>;
   notifications: AppNotification[];
   addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) => void;
   addPushNotification: (notifData: { title: string; body: string; type?: string; image_url?: string; send_to_all?: boolean }) => Promise<void>;
@@ -2030,7 +2030,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (hasAnySupabaseSuccess) {
       setSupabaseStatus('connected');
     } else {
-      setSupabaseStatus('local');
+      setSupabaseStatus('disconnected');
     }
   };
 
@@ -4060,7 +4060,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 contacto: Number(rawContactStr) || 987654321,
                 grado: 1,
                 nivel: 'Primaria',
-                estado: true
+                estado: true,
+                observacion: '',
+                name: `${parsedParts.nombre || 'Estudiante'} ${parsedParts.apellido || ''}`.trim(),
+                email: `${(parsedParts.nombre || 'estudiante').toLowerCase()}@colegioenlacec.edu.pe`,
+                grade: '1° Primaria',
+                section: 'A',
+                parentName: parsedParts.nombre || 'Apoderado',
+                parentPhone: rawContactStr,
+                balance: 0,
+                grades: [],
+                attendanceRate: 100,
+                avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${newFactura.student_id}`,
+                status: 'active'
               };
             }
 

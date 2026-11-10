@@ -4,6 +4,7 @@ import { getThemeClasses } from '../../lib/themeUtils';
 import { uploadToCloudinaryClient } from '../../services/clientServices';
 import { envConfig, maskApiKey } from '../../config/envConfig';
 import { supabase } from '../../lib/supabaseClient';
+import { ReloadSupabaseButton } from '../ReloadSupabaseButton';
 import { 
   Plus, 
   Search, 
@@ -1405,6 +1406,7 @@ export const BovedaFacturasView: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <ReloadSupabaseButton label="Recargar Facturas" showDatabaseBadge={true} />
           <button
             type="button"
             onClick={() => {

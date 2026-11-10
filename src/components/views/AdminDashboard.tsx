@@ -182,7 +182,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
   const [gradeQual, setGradeQual] = useState<string>('EXCELENTE');
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [dniStepCompleted, setDniStepCompleted] = useState(false);
-  const [matriculaMode, setMatriculaMode] = useState<'nuevo' | 'existente'>('nuevo');
+  const [matriculaMode, setMatriculaMode] = useState<'nuevo' | 'existente' | 'manual'>('nuevo');
   const [existingStudentData, setExistingStudentData] = useState<Student | null>(null);
   const [isReniecAutofilled, setIsReniecAutofilled] = useState(false);
 
@@ -2045,6 +2045,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               CSV
             </button>
+
+            <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
 
             <button
               id="btn-export-students-pdf"
@@ -4265,6 +4267,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               </button>
             </div>
 
+            <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
+
             <button
               id="btn-add-teacher-trigger"
               type="button"
@@ -5685,13 +5689,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
             </div>
           </div>
 
-          <div className="flex items-center gap-3 w-full lg:w-auto shrink-0 justify-end">
+          <div className="flex items-center gap-3 w-full lg:w-auto shrink-0 justify-end flex-wrap">
+            <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
             {currentFolder && (
               <button
                 id="btn-drive-back"
                 type="button"
                 onClick={handleGoBack}
-                className="px-4 py-2.5 text-xs bg-white/40 hover:bg-white/60 dark:bg-zinc-800/40 dark:hover:bg-zinc-750/50 text-gray-700 dark:text-zinc-300 rounded-xl font-bold transition-all border border-white/40 dark:border-white/10 shadow-sm"
+                className="px-4 py-2.5 text-xs bg-white/40 hover:bg-white/60 dark:bg-zinc-800/40 dark:hover:bg-zinc-750/50 text-gray-700 dark:text-zinc-300 rounded-xl font-bold transition-all border border-white/40 dark:border-white/10 shadow-sm cursor-pointer"
               >
                 Subir de nivel
               </button>
@@ -6269,7 +6274,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
             <h3 className="text-sm font-bold text-gray-800 dark:text-zinc-200">Terminal de Caja Escolar y Validación Tributaria SUNAT</h3>
             <p className="text-xs text-gray-500">Agrega ingresos/egresos o verifica la validez de facturas y boletas de proveedores en SUNAT antes de contabilizarlas.</p>
           </div>
-          <div className="flex flex-wrap gap-2.5">
+          <div className="flex flex-wrap gap-2.5 items-center">
+            <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
             <button
               type="button"
               onClick={() => {
@@ -6286,7 +6292,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               type="button"
               onClick={() => {
                 setShowFinanceModal('egreso');
-                setFinanceForm({ amount: '', concept: '', category: 'Salario Docente', targetId: '' });
+                setFinanceForm({ amount: '', concept: '', category: 'Salario Docente', targetId: '', tipo: '' });
               }}
               className="px-5 py-2.5 text-xs font-bold bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/40 rounded-xl transition-all flex items-center gap-2 cursor-pointer"
             >
@@ -6298,7 +6304,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
               type="button"
               onClick={() => {
                 setShowFinanceModal('ingreso');
-                setFinanceForm({ amount: '', concept: '', category: 'Colegiatura', targetId: '' });
+                setFinanceForm({ amount: '', concept: '', category: 'Colegiatura', targetId: '', tipo: '' });
               }}
               className={`px-5 py-2.5 text-xs font-bold text-white ${cl.primaryBg} ${cl.primaryHoverBg} rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer`}
             >
@@ -6433,7 +6439,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ activeTab, onCha
                           amount: finCpeMonto,
                           concept: `CPE Validado SUNAT ${finCpeResult.serieCorrelativo} (RUC ${finCpeRuc})`,
                           category: 'Gastos Operativos',
-                          targetId: ''
+                          targetId: '',
+                          tipo: ''
                         });
                       }}
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl cursor-pointer"
@@ -7330,15 +7337,18 @@ SELECT 'usuarios' AS tabla, COUNT(*) AS registros_conservados FROM usuarios;
                 className={`w-full pl-9 pr-4 py-2 text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-950 dark:text-zinc-100 rounded-xl outline-none transition-all ${cl.ring}`}
               />
             </div>
-            {courseSearch && (
-              <button
-                type="button"
-                onClick={() => setCourseSearch('')}
-                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-              >
-                Limpiar Filtros
-              </button>
-            )}
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end flex-wrap">
+              <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
+              {courseSearch && (
+                <button
+                  type="button"
+                  onClick={() => setCourseSearch('')}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                >
+                  Limpiar Filtros
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Responsive Courses list: mobile cards, desktop table */}
@@ -7555,7 +7565,8 @@ SELECT 'usuarios' AS tabla, COUNT(*) AS registros_conservados FROM usuarios;
                 className={`w-full pl-9 pr-4 py-2 text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-gray-950 dark:text-zinc-100 rounded-xl outline-none transition-all ${cl.ring}`}
               />
             </div>
-            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end flex-wrap">
+              <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
               {serviceSearch && (
                 <button
                   type="button"
@@ -8251,60 +8262,52 @@ SELECT 'usuarios' AS tabla, COUNT(*) AS registros_conservados FROM usuarios;
   };
 
 
-  /* =========================================================================
-     ROUTER FOR SELECTED TAB
-     ========================================================================= */
-  const renderViewContent = () => {
-    switch (activeTab) {
-      case 'inicio':
-        return renderInicioValue();
-      case 'pizarra':
-        return <AIBoardSandbox />;
-      case 'tesla-ai':
-        return <TeslaAIChatView />;
-      case 'estudiantes':
-        return renderEstudiantesValue();
-      case 'docentes':
-        return renderDocentesValue();
-      case 'asistencias':
-        return <AdminAsistenciasView onChangeTab={onChangeTab} />;
-      case 'cursos':
-        return renderCursosValue();
-      case 'servicios':
-        return renderServiciosValue();
-      case 'recursos':
-        return renderRecursosValue();
-      case 'finanzas':
-        return renderFinanzasValue();
-      case 'facturas':
-        return (
-          <ErrorBoundary fallbackTitle="Error al cargar la Bóveda de Facturas">
-            <BovedaFacturasView />
-          </ErrorBoundary>
-        );
-      case 'avisos':
-        return <NewsAnnouncementsView />;
-      case 'configuracion':
-        return renderConfiguracionValue();
-      default:
-        return renderInicioValue();
-    }
-  };
+
 
   return (
     <div className={activeTab === 'pizarra' || activeTab === 'tesla-ai' ? "w-full h-full p-0 flex flex-col overflow-hidden" : "p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6"}>
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -15 }}
-          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-          className={activeTab === 'pizarra' || activeTab === 'tesla-ai' ? "w-full h-full flex flex-col flex-1 min-h-0" : ""}
-        >
-          {renderViewContent()}
-        </motion.div>
-      </AnimatePresence>
+      {/* Persist all module states across navigation tabs */}
+      <div style={{ display: activeTab === 'inicio' ? 'block' : 'none' }}>
+        {renderInicioValue()}
+      </div>
+      <div style={{ display: activeTab === 'pizarra' ? 'flex' : 'none' }} className="w-full h-full flex flex-col flex-1 min-h-0">
+        <AIBoardSandbox />
+      </div>
+      <div style={{ display: activeTab === 'tesla-ai' ? 'flex' : 'none' }} className="w-full h-full flex flex-col flex-1 min-h-0">
+        <TeslaAIChatView />
+      </div>
+      <div style={{ display: activeTab === 'estudiantes' ? 'block' : 'none' }}>
+        {renderEstudiantesValue()}
+      </div>
+      <div style={{ display: activeTab === 'docentes' ? 'block' : 'none' }}>
+        {renderDocentesValue()}
+      </div>
+      <div style={{ display: activeTab === 'asistencias' ? 'block' : 'none' }}>
+        <AdminAsistenciasView onChangeTab={onChangeTab} />
+      </div>
+      <div style={{ display: activeTab === 'cursos' ? 'block' : 'none' }}>
+        {renderCursosValue()}
+      </div>
+      <div style={{ display: activeTab === 'servicios' ? 'block' : 'none' }}>
+        {renderServiciosValue()}
+      </div>
+      <div style={{ display: activeTab === 'recursos' ? 'block' : 'none' }}>
+        {renderRecursosValue()}
+      </div>
+      <div style={{ display: activeTab === 'finanzas' ? 'block' : 'none' }}>
+        {renderFinanzasValue()}
+      </div>
+      <div style={{ display: activeTab === 'facturas' ? 'block' : 'none' }}>
+        <ErrorBoundary fallbackTitle="Error al cargar la Bóveda de Facturas">
+          <BovedaFacturasView />
+        </ErrorBoundary>
+      </div>
+      <div style={{ display: activeTab === 'avisos' ? 'block' : 'none' }}>
+        <NewsAnnouncementsView />
+      </div>
+      <div style={{ display: activeTab === 'configuracion' ? 'block' : 'none' }}>
+        {renderConfiguracionValue()}
+      </div>
 
       <AnimatePresence>
         {selectedTeacher && (

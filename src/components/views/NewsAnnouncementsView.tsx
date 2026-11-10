@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { ReloadSupabaseButton } from '../ReloadSupabaseButton';
 import { SchoolNews } from '../../types';
 import { 
   Megaphone, 
@@ -54,7 +55,7 @@ export const NewsAnnouncementsView: React.FC = () => {
   // Form states
   const [formTitle, setFormTitle] = useState('');
   const [formContent, setFormContent] = useState('');
-  const [formCategory, setFormCategory] = useState<'evento' | 'noticia'>('noticia');
+  const [formCategory, setFormCategory] = useState<any>('noticia');
   const [formImageUrl, setFormImageUrl] = useState('');
   const [formAuthor, setFormAuthor] = useState('');
   const [sendPushNotificationToggle, setSendPushNotificationToggle] = useState(true);
@@ -274,33 +275,36 @@ export const NewsAnnouncementsView: React.FC = () => {
           </p>
         </div>
 
-        {isAdmin && (
-          <div className="flex items-center gap-2 self-start md:self-auto">
-            <button
-              type="button"
-              onClick={async () => {
-                const granted = await requestBrowserNotificationPermission();
-                if (granted) {
-                  alert('✅ Permiso de notificaciones push de navegador concedido exitosamente.');
-                } else {
-                  alert('ℹ️ Los permisos de notificación fueron denegados o no están soportados en este navegador.');
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 rounded-xl font-bold text-xs transition-all cursor-pointer"
-              title="Activar notificaciones push en navegador"
-            >
-              🔔 Activar Push
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenCreate}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-600/10 hover:shadow-indigo-600/20 active:scale-98 transition-all cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              Publicar Aviso / Evento
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
+          <ReloadSupabaseButton label="Recargar" showDatabaseBadge={true} />
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                onClick={async () => {
+                  const granted = await requestBrowserNotificationPermission();
+                  if (granted) {
+                    alert('✅ Permiso de notificaciones push de navegador concedido exitosamente.');
+                  } else {
+                    alert('ℹ️ Los permisos de notificación fueron denegados o no están soportados en este navegador.');
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 rounded-xl font-bold text-xs transition-all cursor-pointer"
+                title="Activar notificaciones push en navegador"
+              >
+                🔔 Activar Push
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenCreate}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-600/10 hover:shadow-indigo-600/20 active:scale-98 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                Publicar Aviso / Evento
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Filters & Search */}

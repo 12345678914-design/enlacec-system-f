@@ -13,6 +13,8 @@ export interface User {
   avatarUrl?: string;
   course?: string; // For teachers, which course they lead
   si_pass?: boolean; // If they are logged in with temporary password
+  nombre?: string;
+  apellido?: string;
 }
 
 export interface Student {
@@ -25,6 +27,9 @@ export interface Student {
   observacion: string; // text
   estado: boolean; // bool
   created_at?: string; // timestamp
+  servicio_id?: string;
+  seccion?: string;
+  promedio?: number;
 
   // Mapped/compatibility fields:
   name: string;
@@ -69,6 +74,7 @@ export interface Teacher {
   email?: string;
   subject?: string;  // Specialization
   especialidad?: string;
+  materia?: string;
   phone?: string;
   salary?: number;   // Monthly salary
   hourlyRate?: number;
@@ -96,6 +102,7 @@ export interface FinancialTransaction {
   type: 'ingreso' | 'egreso';
   amount: number;
   concept: string;
+  descripcion?: string;
   category: 'Colegiatura' | 'Salario Docente' | 'Material Educativo' | 'Servicios' | 'Otros';
   date: string; // YYYY-MM-DD
   studentId?: string; // If student payment
@@ -149,6 +156,8 @@ export interface ServiceCourse {
   curso_id: string;
   servicioId?: string;
   cursoId?: string;
+  id_servicio?: string;
+  id_curso?: string;
 }
 
 export interface ServiceTeacher {
@@ -175,10 +184,11 @@ export interface AppThemeConfig {
 export interface SchoolNews {
   id: string;
   title: string;
+  titulo?: string;
   content: string;
   date: string;
   author: string;
-  category: 'académico' | 'administrativo' | 'evento' | 'urgente' | 'aviso';
+  category: 'académico' | 'administrativo' | 'evento' | 'urgente' | 'aviso' | 'noticia';
   imageUrl?: string;
 }
 
